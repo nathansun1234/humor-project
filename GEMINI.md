@@ -1,1 +1,1 @@
-If database structure is needed, refer to schema.sql
+If database structure is needed, refer to dorms_row.sql
