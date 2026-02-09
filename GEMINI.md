@@ -1,0 +1,1 @@
+If database structure is needed, refer to dorms_row.sql
