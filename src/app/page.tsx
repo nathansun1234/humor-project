@@ -1,25 +1,29 @@
-import { supabase } from "@/utils/supabase/server";
+'use client'
 
-export const revalidate = 0; // optional: force SSR each request
+import { createClient } from "@/lib/supabase/client";
 
-export default async function Home() {
-    const { data: captions, error } = await supabase.from("captions").select();
+export default function Home() {
+    const supabase = createClient();
+
+    const handleSignInWithGoogle = async () => {
+        await supabase.auth.signInWithOAuth({
+            provider: 'google',
+            options: {
+                redirectTo: `${location.origin}/auth/callback`,
+            },
+        });
+    };
 
     return (
-        <main className="flex min-h-screen flex-col items-center justify-start px-4 py-8">
-            <h1 className="text-5xl font-bold mb-12">Captions</h1>
-            <div className="flex flex-col gap-8 w-full">
-                {captions?.map((caption) => (
-                    <div
-                        key={caption.id}
-                        className="w-full rounded overflow-hidden shadow-lg bg-white p-6"
-                    >
-                        <div className="font-bold text-xl mb-2">{caption.title}</div>
-                        <p className="text-gray-700 text-base">{caption.content}</p>
-                    </div>
-                ))}
-            </div>
-            {error && <p className="text-red-500 mt-4">Error: {error.message}</p>}
+        <main className="flex min-h-screen flex-col items-center justify-center p-24">
+            <h1 className="text-5xl font-bold mb-8">Welcome</h1>
+            <p className="text-xl mb-8">Sign in to view captions.</p>
+            <button
+                onClick={handleSignInWithGoogle}
+                className="flex items-center px-4 py-2 bg-blue-600 text-white font-semibold rounded-full shadow-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+            >
+                Sign in with Google
+            </button>
         </main>
     );
 }
