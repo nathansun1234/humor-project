@@ -1,4 +1,6 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+# idea
+.idea/
 
 # dependencies
 /node_modules
@@ -40,5 +42,9 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-#gemini
+# gemini
 GEMINI.md
+
+# schemas
+captions.sql
+caption_votes.sql
