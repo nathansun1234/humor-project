@@ -42,9 +42,10 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# gemini
-GEMINI.md
+# agents
+agents.md
 
 # schemas
 captions.sql
 caption_votes.sql
+images.sql

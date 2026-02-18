@@ -15,7 +15,7 @@ export default function SignOutButton({ className }: { className?: string }) {
   return (
     <button
       onClick={handleSignOut}
-      className={`px-4 py-2 bg-red-600 text-white rounded-full hover:bg-red-700 ${className || ''}`}
+      className={`rounded-xl bg-rose-500/20 px-4 py-2 font-semibold text-rose-800 transition hover:bg-rose-500/35 dark:text-rose-100 ${className || ''}`}
     >
       Sign Out
     </button>

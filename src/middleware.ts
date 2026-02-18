@@ -1,6 +1,8 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
+type CookieOptionBag = Record<string, string | number | boolean | Date | undefined>
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
@@ -14,10 +16,10 @@ export async function middleware(request: NextRequest) {
             get(name: string) {
               return request.cookies.get(name)?.value
             },
-            set(name: string, value: string, options: any) {
+            set(..._args: [string, string, CookieOptionBag]) {
               // Normally middleware shouldn't set cookies unless needed
             },
-            remove(name: string, options: any) {
+            remove(..._args: [string, CookieOptionBag]) {
               // Normally middleware shouldn't remove cookies
             },
           },

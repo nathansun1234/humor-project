@@ -22,8 +22,24 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const themeBootScript = `
+    (() => {
+      try {
+        const stored = localStorage.getItem('ui-theme');
+        const systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        const resolved = stored === 'dark' || stored === 'light' ? stored : (systemDark ? 'dark' : 'light');
+        const root = document.documentElement;
+        root.classList.toggle('dark', resolved === 'dark');
+        root.style.colorScheme = resolved;
+      } catch {}
+    })();
+  `;
+
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeBootScript }} />
+      </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
