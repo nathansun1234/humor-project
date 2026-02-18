@@ -12,6 +12,16 @@ export async function createClient() {
         getAll() {
           return cookieStore.getAll()
         },
+        setAll(cookiesToSet) {
+          try {
+            for (const { name, value, options } of cookiesToSet) {
+              cookieStore.set(name, value, options)
+            }
+          } catch {
+            // `cookies().set()` is unavailable in some Server Component contexts.
+            // Route handlers and middleware should still persist auth cookies.
+          }
+        },
       },
     }
   )
