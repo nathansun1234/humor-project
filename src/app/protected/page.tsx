@@ -1,8 +1,8 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
-import SignOutButton from './components/SignOutButton'
 import CaptionVotingPanel from './components/CaptionVotingPanel'
-import ThemeToggle from '../components/ThemeToggle'
+import ProtectedBackgroundLayer from './components/ProtectedBackgroundLayer'
+import SettingsMenu from '../components/SettingsMenu'
 
 export const revalidate = 0; // optional: force SSR each request
 
@@ -20,6 +20,17 @@ type ImageRecord = {
     url?: string | null
 }
 
+function shuffleCaptions(captions: CaptionRecord[]): CaptionRecord[] {
+    const shuffled = [...captions]
+
+    for (let index = shuffled.length - 1; index > 0; index -= 1) {
+        const randomIndex = Math.floor(Math.random() * (index + 1))
+        ;[shuffled[index], shuffled[randomIndex]] = [shuffled[randomIndex], shuffled[index]]
+    }
+
+    return shuffled
+}
+
 export default async function ProtectedPage() {
     const supabase = await createClient()
 
@@ -35,10 +46,8 @@ export default async function ProtectedPage() {
         .from('captions')
         .select('*')
         .eq('is_public', true)
-        .order('id', { ascending: false })
-        .range(0, 1)
 
-    const baseCaptions = (captions ?? []) as CaptionRecord[]
+    const baseCaptions = shuffleCaptions((captions ?? []) as CaptionRecord[])
     const imageIds = Array.from(
         new Set(baseCaptions.map((caption) => caption.image_id).filter((imageId): imageId is string => Boolean(imageId)))
     )
@@ -87,12 +96,16 @@ export default async function ProtectedPage() {
 
     return (
         <main className="relative min-h-screen overflow-hidden bg-slate-100 px-4 py-6 text-slate-900 dark:bg-slate-950 dark:text-slate-50">
-            <ThemeToggle />
-            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(16,185,129,0.14),transparent_45%),radial-gradient(circle_at_bottom,rgba(14,165,233,0.12),transparent_40%)] dark:bg-[radial-gradient(circle_at_top,rgba(34,197,94,0.16),transparent_45%),radial-gradient(circle_at_bottom,rgba(14,165,233,0.14),transparent_40%)]" />
+            <ProtectedBackgroundLayer />
+            <SettingsMenu
+                showSignOut
+                showProtectedToggles
+                userEmail={user.email ?? null}
+                profileId={user.id ?? null}
+            />
             <div className="relative flex w-full flex-col gap-6">
-                <header className="flex flex-wrap items-center justify-between gap-4">
+                <header className="flex flex-wrap items-center gap-4">
                     <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Caption Voting</h1>
-                    <SignOutButton />
                 </header>
 
                 <CaptionVotingPanel initialCaptions={hydratedCaptions} initialUserId={user.id} />

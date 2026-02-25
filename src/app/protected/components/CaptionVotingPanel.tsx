@@ -1,8 +1,9 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import NextImage from 'next/image'
 import { createClient } from '@/lib/supabase/client'
+import { DYNAMIC_BACKGROUND_STORAGE_KEY, readStoredBoolean } from '@/lib/protected-settings'
 
 type CaptionRecord = {
   id: string
@@ -13,18 +14,26 @@ type CaptionRecord = {
   imageUrl?: string | null
 }
 
-type ImageRecord = {
-  url?: string | null
-}
-
 type VoteValue = -1 | 1
 type SeenVoteRow = { caption_id: string }
-type QueueSnapshot = {
-  queue: CaptionRecord[]
-  cursor: string | null
-}
+type UndoSnapshot = { index: number; vote: VoteValue }
+type CaptionImageDetail = { imageUrl: string | null }
+type BackgroundFeedbackDetail = { kind: 'upvote' | 'downvote' | 'undo' }
 
-const MAX_LOADED_CAPTIONS = 2
+const BACKGROUND_EVENT_NAME = 'protected:caption-image'
+const BACKGROUND_IMAGE_REQUEST_EVENT = 'protected:caption-image-request'
+const BACKGROUND_FEEDBACK_EVENT = 'protected:background-feedback'
+const FEEDBACK_FLASH_DELAY_MS = 120
+
+function findNextUnseenIndex(captions: CaptionRecord[], seenIds: Set<string>, startIndex: number): number {
+  for (let index = startIndex; index < captions.length; index += 1) {
+    if (!seenIds.has(captions[index].id)) {
+      return index
+    }
+  }
+
+  return captions.length
+}
 
 export default function CaptionVotingPanel({
   initialCaptions,
@@ -34,28 +43,58 @@ export default function CaptionVotingPanel({
   initialUserId: string
 }) {
   const supabase = useMemo(() => createClient(), [])
-  const initialQueue = initialCaptions.slice(0, MAX_LOADED_CAPTIONS)
 
-  const [captionQueue, setCaptionQueue] = useState<CaptionRecord[]>(initialQueue)
-  const [scanCursor, setScanCursor] = useState<string | null>(
-    initialQueue.length > 0 ? initialQueue[initialQueue.length - 1].id : null
-  )
+  const [currentIndex, setCurrentIndex] = useState(0)
+  const [undoIndex, setUndoIndex] = useState<number | null>(null)
   const [voteInFlight, setVoteInFlight] = useState(false)
   const [activeVote, setActiveVote] = useState<VoteValue | null>(null)
   const [userId, setUserId] = useState<string | null>(initialUserId)
   const [message, setMessage] = useState<string | null>(null)
   const [seenCaptionIds, setSeenCaptionIds] = useState<Set<string>>(new Set())
   const [seenLookupReady, setSeenLookupReady] = useState(false)
-  const [lastVoteAction, setLastVoteAction] = useState<QueueSnapshot | null>(null)
-  const imageUrlCacheRef = useRef<Map<string, string | null>>(new Map())
+  const [lastVoteAction, setLastVoteAction] = useState<UndoSnapshot | null>(null)
+  const [undoReminderVote, setUndoReminderVote] = useState<VoteValue | null>(null)
 
-  const currentCaption = captionQueue[0] ?? null
-  const nextCaption = captionQueue[1] ?? null
+  const unseenIndex = findNextUnseenIndex(initialCaptions, seenCaptionIds, currentIndex)
+  const computedDisplayIndex = unseenIndex
+  const displayIndex = undoIndex ?? computedDisplayIndex
+  const currentCaption = initialCaptions[displayIndex] ?? null
+  const nextCaptionIndex = currentCaption
+    ? findNextUnseenIndex(initialCaptions, seenCaptionIds, displayIndex + 1)
+    : initialCaptions.length
+  const nextCaption = initialCaptions[nextCaptionIndex] ?? null
+  const currentCaptionImageUrl = currentCaption ? getCaptionImageUrl(currentCaption) : null
+  const nextCaptionImageUrl = nextCaption ? getCaptionImageUrl(nextCaption) : null
   const canVote = Boolean(userId) && Boolean(currentCaption) && !voteInFlight && seenLookupReady
   const cardTheme =
-    'border-slate-200 bg-white/90 text-slate-900 dark:border-white/10 dark:bg-slate-900/75 dark:text-slate-100'
+    'border-slate-200 bg-white text-slate-900 dark:border-white/10 dark:bg-black dark:text-slate-100'
   const mutedText = 'text-slate-600 dark:text-slate-300'
-  const panelFrame = 'mx-auto flex h-[72dvh] w-full max-w-2xl flex-col rounded-2xl border shadow-2xl backdrop-blur'
+  const panelFrame = 'mx-auto flex h-[77dvh] w-full max-w-2xl flex-col rounded-2xl border shadow-2xl backdrop-blur'
+
+  const dispatchBackgroundImage = useCallback((imageUrl: string | null) => {
+    window.dispatchEvent(
+      new CustomEvent<CaptionImageDetail>(BACKGROUND_EVENT_NAME, {
+        detail: { imageUrl },
+      })
+    )
+  }, [])
+
+  const runBackgroundFeedback = useCallback(async (kind: BackgroundFeedbackDetail['kind']) => {
+    const dynamicBackgroundEnabled = readStoredBoolean(DYNAMIC_BACKGROUND_STORAGE_KEY, true)
+    if (!dynamicBackgroundEnabled) {
+      return
+    }
+
+    window.dispatchEvent(
+      new CustomEvent<BackgroundFeedbackDetail>(BACKGROUND_FEEDBACK_EVENT, {
+        detail: { kind },
+      })
+    )
+
+    await new Promise<void>((resolve) => {
+      window.setTimeout(resolve, FEEDBACK_FLASH_DELAY_MS)
+    })
+  }, [])
 
   const fetchSeenCaptionIds = useCallback(
     async (profileId: string) => {
@@ -74,136 +113,21 @@ export default function CaptionVotingPanel({
     [supabase]
   )
 
-  const fetchCaptionAfterCursor = useCallback(
-    async (afterId: string | null) => {
-      let query = supabase
-        .from('captions')
-        .select('*')
-        .eq('is_public', true)
-        .order('id', { ascending: false })
-        .limit(1)
-
-      if (afterId) {
-        query = query.lt('id', afterId)
-      }
-
-      const { data, error } = await query
-      if (error) {
-        return { caption: null as CaptionRecord | null, cursor: afterId, errorMessage: error.message }
-      }
-
-      const caption = ((data as CaptionRecord[] | null)?.[0] ?? null) as CaptionRecord | null
-      if (!caption) {
-        return { caption: null as CaptionRecord | null, cursor: afterId, errorMessage: null as string | null }
-      }
-
-      return { caption, cursor: caption.id, errorMessage: null as string | null }
-    },
-    [supabase]
-  )
-
-  const resolveCaptionImage = useCallback(
-    async (caption: CaptionRecord) => {
-      const existingImageUrl = getCaptionImageUrl(caption)
-      const imageId = caption.image_id
-
-      if (!imageId) {
-        return caption
-      }
-
-      if (existingImageUrl) {
-        imageUrlCacheRef.current.set(imageId, existingImageUrl)
-        return caption
-      }
-
-      if (imageUrlCacheRef.current.has(imageId)) {
-        return {
-          ...caption,
-          image_url: imageUrlCacheRef.current.get(imageId) ?? null,
-        }
-      }
-
-      const { data, error } = await supabase
-        .from('images')
-        .select('url')
-        .eq('id', imageId)
-        .eq('is_public', true)
-        .maybeSingle()
-
-      if (error) {
-        return caption
-      }
-
-      const resolvedImageUrl = ((data as ImageRecord | null)?.url ?? null)
-      imageUrlCacheRef.current.set(imageId, resolvedImageUrl)
-
-      if (!resolvedImageUrl) {
-        return caption
-      }
-
-      return {
-        ...caption,
-        image_url: resolvedImageUrl,
-      }
-    },
-    [supabase]
-  )
-
-  const fetchNextUnseenCaption = useCallback(
-    async (afterId: string | null, seenIds: Set<string>) => {
-      let cursor = afterId
-
-      while (true) {
-        const { caption, cursor: nextCursor, errorMessage } = await fetchCaptionAfterCursor(cursor)
-
-        if (errorMessage) {
-          return { caption: null as CaptionRecord | null, cursor, errorMessage }
-        }
-
-        if (!caption) {
-          return { caption: null as CaptionRecord | null, cursor: nextCursor, errorMessage: null as string | null }
-        }
-
-        cursor = nextCursor
-        if (!seenIds.has(caption.id)) {
-          const hydratedCaption = await resolveCaptionImage(caption)
-          return { caption: hydratedCaption, cursor, errorMessage: null as string | null }
-        }
-      }
-    },
-    [fetchCaptionAfterCursor, resolveCaptionImage]
-  )
-
-  const refillQueue = useCallback(
-    async (startQueue: CaptionRecord[], startCursor: string | null, seenIds: Set<string>) => {
-      const queue = [...startQueue]
-      let cursor = startCursor
-
-      while (queue.length < MAX_LOADED_CAPTIONS) {
-        const { caption, cursor: nextCursor, errorMessage } = await fetchNextUnseenCaption(cursor, seenIds)
-        cursor = nextCursor
-
-        if (errorMessage) {
-          return { queue, cursor, errorMessage }
-        }
-
-        if (!caption) {
-          break
-        }
-
-        queue.push(caption)
-      }
-
-      return { queue, cursor, errorMessage: null as string | null }
-    },
-    [fetchNextUnseenCaption]
-  )
-
   useEffect(() => {
     let cancelled = false
 
     const syncSession = async () => {
-      const { data } = await supabase.auth.getSession()
+      const { data, error } = await supabase.auth.getSession()
+
+      if (error) {
+        await supabase.auth.signOut()
+        if (!cancelled) {
+          setUserId(null)
+          setMessage('Your session expired. Please sign in again.')
+        }
+        return
+      }
+
       if (!cancelled) {
         setUserId(data.session?.user?.id ?? null)
       }
@@ -218,10 +142,12 @@ export default function CaptionVotingPanel({
   useEffect(() => {
     let cancelled = false
 
-    const hydrateQueue = async () => {
+    const hydrateSeenLookup = async () => {
       if (seenLookupReady) return
 
       if (!userId) {
+        setCurrentIndex(0)
+        setUndoIndex(null)
         setSeenLookupReady(true)
         return
       }
@@ -233,56 +159,62 @@ export default function CaptionVotingPanel({
         setMessage(`Could not look up prior votes: ${errorMessage}`)
       }
 
-      const unseenInitialQueue = captionQueue.filter((caption) => !seenIds.has(caption.id))
-      const { queue, cursor, errorMessage: queueErrorMessage } = await refillQueue(unseenInitialQueue, scanCursor, seenIds)
-      if (cancelled) return
-
-      if (queueErrorMessage) {
-        setMessage(`Could not load captions: ${queueErrorMessage}`)
-      }
-
       setSeenCaptionIds(seenIds)
-      setCaptionQueue(queue)
-      setScanCursor(cursor)
+      setCurrentIndex(findNextUnseenIndex(initialCaptions, seenIds, 0))
+      setUndoIndex(null)
       setSeenLookupReady(true)
     }
 
-    void hydrateQueue()
+    void hydrateSeenLookup()
     return () => {
       cancelled = true
     }
-  }, [captionQueue, fetchSeenCaptionIds, refillQueue, scanCursor, seenLookupReady, userId])
+  }, [fetchSeenCaptionIds, initialCaptions, seenLookupReady, userId])
 
   useEffect(() => {
-    if (!nextCaption) return
-    const nextImageUrl = getCaptionImageUrl(nextCaption)
-    if (!nextImageUrl) return
+    dispatchBackgroundImage(currentCaptionImageUrl)
+  }, [currentCaptionImageUrl, dispatchBackgroundImage])
+
+  useEffect(() => {
+    const handleImageRequest = () => {
+      dispatchBackgroundImage(currentCaptionImageUrl)
+    }
+
+    window.addEventListener(BACKGROUND_IMAGE_REQUEST_EVENT, handleImageRequest)
+    return () => {
+      window.removeEventListener(BACKGROUND_IMAGE_REQUEST_EVENT, handleImageRequest)
+    }
+  }, [currentCaptionImageUrl, dispatchBackgroundImage])
+
+  useEffect(() => {
+    if (!nextCaptionImageUrl) return
 
     const image = new window.Image()
-    image.src = nextImageUrl
-  }, [nextCaption])
+    image.src = nextCaptionImageUrl
+  }, [nextCaptionImageUrl])
 
   const handleVote = async (vote: VoteValue) => {
     if (!currentCaption || !userId || voteInFlight || !seenLookupReady) return
 
     setVoteInFlight(true)
     setActiveVote(vote)
+    setUndoReminderVote(null)
     setMessage(null)
 
     const { data: existingVoteRow, error: existingVoteError } = await supabase
       .from('caption_votes')
-      .select('vote_value')
+      .select('id,vote_value')
       .eq('caption_id', currentCaption.id)
       .eq('profile_id', userId)
       .maybeSingle()
 
     if (existingVoteError) {
       setVoteInFlight(false)
+      setActiveVote(null)
       setMessage(`Could not check prior vote: ${existingVoteError.message}`)
       return
     }
 
-    const previousVote = ((existingVoteRow?.vote_value ?? null) as VoteValue | null)
     const now = new Date().toISOString()
 
     const votePayload = {
@@ -293,10 +225,10 @@ export default function CaptionVotingPanel({
       modified_datetime_utc: now,
     }
 
+    const hasExistingVoteRow = Boolean(existingVoteRow)
     const { error: voteError } =
-      previousVote === null
-        ? await supabase.from('caption_votes').insert(votePayload)
-        : await supabase
+      hasExistingVoteRow
+        ? await supabase
             .from('caption_votes')
             .update({
               vote_value: vote,
@@ -304,42 +236,45 @@ export default function CaptionVotingPanel({
             })
             .eq('caption_id', currentCaption.id)
             .eq('profile_id', userId)
+        : await supabase.from('caption_votes').insert(votePayload)
 
     if (voteError) {
       setVoteInFlight(false)
+      setActiveVote(null)
       setMessage(`Could not save vote: ${voteError.message}`)
       return
     }
 
+    await runBackgroundFeedback(vote === 1 ? 'upvote' : 'downvote')
+
     setLastVoteAction({
-      queue: captionQueue,
-      cursor: scanCursor,
+      index: displayIndex,
+      vote,
     })
 
     const updatedSeenIds = new Set(seenCaptionIds)
     updatedSeenIds.add(currentCaption.id)
     setSeenCaptionIds(updatedSeenIds)
-
-    const { queue, cursor, errorMessage } = await refillQueue(captionQueue.slice(1), scanCursor, updatedSeenIds)
-
-    if (errorMessage) {
-      setMessage(`Could not load next caption: ${errorMessage}`)
-    }
-
-    setCaptionQueue(queue)
-    setScanCursor(cursor)
+    setUndoIndex(null)
+    setCurrentIndex(findNextUnseenIndex(initialCaptions, updatedSeenIds, displayIndex + 1))
     setActiveVote(null)
     setVoteInFlight(false)
   }
 
-  const handleUndo = () => {
+  const handleUndo = async () => {
     if (!lastVoteAction || voteInFlight) return
-
-    setCaptionQueue(lastVoteAction.queue)
-    setScanCursor(lastVoteAction.cursor)
+    const previousAction = lastVoteAction
+    setVoteInFlight(true)
     setLastVoteAction(null)
     setActiveVote(null)
     setMessage(null)
+
+    await runBackgroundFeedback('undo')
+
+    setCurrentIndex(previousAction.index)
+    setUndoIndex(previousAction.index)
+    setUndoReminderVote(previousAction.vote)
+    setVoteInFlight(false)
   }
 
   if (!seenLookupReady) {
@@ -354,25 +289,23 @@ export default function CaptionVotingPanel({
   if (!currentCaption) {
     return (
       <section className={`${panelFrame} p-5 sm:p-6 ${cardTheme}`}>
-        <p className="text-lg font-medium">No more captions to vote on right now.</p>
-        <p className={`mt-2 text-sm ${mutedText}`}>Check back later for another batch.</p>
+        <p className="text-lg font-medium">No more unseen captions to vote on right now.</p>
+        <p className={`mt-2 text-sm ${mutedText}`}>Check back later after more captions are added.</p>
       </section>
     )
   }
-
-  const imageUrl = getCaptionImageUrl(currentCaption)
 
   return (
     <section className={`${panelFrame} p-3 sm:p-5 ${cardTheme}`}>
       <article
         key={currentCaption.id}
-        className="min-h-0 flex-1 overflow-hidden rounded-2xl border border-slate-200 bg-slate-100/70 p-3 opacity-100 transition-all duration-200 ease-out dark:border-white/10 dark:bg-black/15 sm:p-4"
+        className="min-h-0 flex-1 overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 p-3 opacity-100 transition-all duration-200 ease-out dark:border-white/10 dark:bg-[#0d0d0d] sm:p-4"
       >
-        <div className="grid h-full min-h-0 grid-rows-[72%_28%] gap-3">
-          <div className="min-h-0 rounded-xl bg-slate-100/70 p-1 dark:bg-black/15 sm:p-2">
-            {imageUrl ? (
+        <div className="grid h-full min-h-0 grid-rows-[82%_18%] gap-0">
+          <div className="min-h-0 rounded-t-xl rounded-b-none bg-slate-100 p-1 dark:bg-[#0d0d0d] sm:p-2">
+            {currentCaptionImageUrl ? (
               <NextImage
-                src={imageUrl}
+                src={currentCaptionImageUrl}
                 alt="Caption visual"
                 width={1200}
                 height={800}
@@ -386,7 +319,7 @@ export default function CaptionVotingPanel({
               </div>
             )}
           </div>
-          <div className="min-h-0 overflow-y-auto rounded-xl bg-slate-100/70 px-3 py-3 dark:bg-black/15 sm:px-4">
+          <div className="min-h-0 overflow-y-auto rounded-b-xl rounded-t-none bg-slate-100 px-3 py-3 dark:bg-[#0d0d0d] sm:px-4">
             <p className="text-center text-lg leading-relaxed sm:text-xl">
               {currentCaption.content || currentCaption.title || 'Untitled caption'}
             </p>
@@ -400,10 +333,12 @@ export default function CaptionVotingPanel({
             type="button"
             onClick={() => void handleVote(1)}
             disabled={!canVote}
-            className={`flex-1 rounded-xl px-3 py-2.5 text-sm font-semibold transition sm:text-base ${
+            className={`flex-1 rounded-xl border px-3 py-2.5 text-sm font-semibold transition sm:text-base ${
               activeVote === 1
-                ? 'scale-[1.01] bg-emerald-500 text-white'
-                : 'bg-emerald-500/20 text-emerald-800 hover:bg-emerald-500/35 disabled:opacity-40 dark:text-emerald-100'
+                ? 'scale-[1.01] border-emerald-500 bg-emerald-500 text-white'
+                : undoIndex !== null && undoReminderVote === 1
+                  ? 'border-2 border-emerald-600 ring-2 ring-emerald-400/80 bg-emerald-500/25 text-emerald-900 shadow-sm hover:bg-emerald-500/35 disabled:opacity-40 dark:border-emerald-300 dark:ring-emerald-300/75 dark:text-emerald-100'
+                  : 'border-transparent bg-emerald-500/20 text-emerald-800 hover:bg-emerald-500/35 disabled:opacity-40 dark:text-emerald-100'
             }`}
           >
             Upvote +1
@@ -412,10 +347,12 @@ export default function CaptionVotingPanel({
             type="button"
             onClick={() => void handleVote(-1)}
             disabled={!canVote}
-            className={`flex-1 rounded-xl px-3 py-2.5 text-sm font-semibold transition sm:text-base ${
+            className={`flex-1 rounded-xl border px-3 py-2.5 text-sm font-semibold transition sm:text-base ${
               activeVote === -1
-                ? 'scale-[1.01] bg-rose-500 text-white'
-                : 'bg-rose-500/20 text-rose-800 hover:bg-rose-500/35 disabled:opacity-40 dark:text-rose-100'
+                ? 'scale-[1.01] border-rose-500 bg-rose-500 text-white'
+                : undoIndex !== null && undoReminderVote === -1
+                  ? 'border-2 border-rose-600 ring-2 ring-rose-400/80 bg-rose-500/25 text-rose-900 shadow-sm hover:bg-rose-500/35 disabled:opacity-40 dark:border-rose-300 dark:ring-rose-300/75 dark:text-rose-100'
+                  : 'border-transparent bg-rose-500/20 text-rose-800 hover:bg-rose-500/35 disabled:opacity-40 dark:text-rose-100'
             }`}
           >
             Downvote -1
@@ -438,7 +375,7 @@ export default function CaptionVotingPanel({
         </button>
       </div>
 
-      <div className="mt-3 min-h-[2.5rem] shrink-0">
+      <div className="mt-3 min-h-0 shrink-0 sm:mt-4">
         {message && (
           <p className="rounded-lg border border-amber-500/45 bg-amber-500/15 px-3 py-2 text-sm text-amber-800 dark:text-amber-100">
             {message}

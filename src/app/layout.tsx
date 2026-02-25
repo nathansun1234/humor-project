@@ -25,9 +25,10 @@ export default function RootLayout({
   const themeBootScript = `
     (() => {
       try {
-        const stored = localStorage.getItem('ui-theme');
-        const systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-        const resolved = stored === 'dark' || stored === 'light' ? stored : (systemDark ? 'dark' : 'light');
+        // Reset per-load defaults: light theme + dynamic background enabled.
+        localStorage.setItem('ui-theme', 'light');
+        localStorage.setItem('protected-dynamic-background', 'true');
+        const resolved = 'light';
         const root = document.documentElement;
         root.classList.toggle('dark', resolved === 'dark');
         root.style.colorScheme = resolved;
