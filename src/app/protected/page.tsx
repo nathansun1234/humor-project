@@ -1,8 +1,8 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
-import CaptionVotingPanel from './components/CaptionVotingPanel'
 import ProtectedBackgroundLayer from './components/ProtectedBackgroundLayer'
 import SettingsMenu from '../components/SettingsMenu'
+import ProtectedPanelSwitcher from './components/ProtectedPanelSwitcher'
 
 export const revalidate = 0; // optional: force SSR each request
 
@@ -104,14 +104,10 @@ export default async function ProtectedPage() {
                 profileId={user.id ?? null}
             />
             <div className="relative flex w-full flex-col gap-6">
-                <header className="flex flex-wrap items-center gap-4">
-                    <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Caption Voting</h1>
-                </header>
-
-                <CaptionVotingPanel initialCaptions={hydratedCaptions} initialUserId={user.id} />
+                <ProtectedPanelSwitcher initialCaptions={hydratedCaptions} initialUserId={user.id} />
 
                 {loadErrorMessage && (
-                    <p className="rounded-lg border border-red-500/40 bg-red-500/15 px-3 py-2 text-sm text-red-800 dark:text-red-100">
+                    <p className="rounded-xl border border-rose-500/40 bg-rose-500/15 px-3 py-2 text-sm text-rose-800 dark:text-rose-100">
                         {loadErrorMessage}
                     </p>
                 )}

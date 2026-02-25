@@ -54,9 +54,11 @@ function findNextUnseenIndex(captions: CaptionRecord[], seenIds: Set<string>, st
 export default function CaptionVotingPanel({
   initialCaptions,
   initialUserId,
+  isActive = true,
 }: {
   initialCaptions: CaptionRecord[]
   initialUserId: string
+  isActive?: boolean
 }) {
   const supabase = useMemo(() => createClient(), [])
 
@@ -91,7 +93,9 @@ export default function CaptionVotingPanel({
   const previousCaptionImageUrl = previousCaption ? getCaptionImageUrl(previousCaption) : null
   const nextCaptionImageUrl = nextCaption ? getCaptionImageUrl(nextCaption) : null
   const isTurning = turnState !== null
-  const showPreviousStackPanel = previousCaption !== null && undoIndex === null
+  const hasUndoHistory = Boolean(lastVoteAction)
+  const canUndo = hasUndoHistory && !voteInFlight
+  const showPreviousStackPanel = previousCaption !== null && undoIndex === null && hasUndoHistory
   const canVote = Boolean(userId) && Boolean(currentCaption) && !voteInFlight && !isTurning && seenLookupReady
   const cardTheme =
     'border-slate-200 bg-white text-slate-900 dark:border-white/10 dark:bg-black dark:text-slate-100'
@@ -239,11 +243,13 @@ export default function CaptionVotingPanel({
   }, [fetchSeenCaptionIds, initialCaptions, seenLookupReady, userId])
 
   useEffect(() => {
+    if (!isActive) return
     dispatchBackgroundImage(currentCaptionImageUrl)
-  }, [currentCaptionImageUrl, dispatchBackgroundImage])
+  }, [currentCaptionImageUrl, dispatchBackgroundImage, isActive])
 
   useEffect(() => {
     const handleImageRequest = () => {
+      if (!isActive) return
       dispatchBackgroundImage(currentCaptionImageUrl)
     }
 
@@ -251,7 +257,7 @@ export default function CaptionVotingPanel({
     return () => {
       window.removeEventListener(BACKGROUND_IMAGE_REQUEST_EVENT, handleImageRequest)
     }
-  }, [currentCaptionImageUrl, dispatchBackgroundImage])
+  }, [currentCaptionImageUrl, dispatchBackgroundImage, isActive])
 
   useEffect(() => {
     if (!nextCaptionImageUrl) return
@@ -298,6 +304,7 @@ export default function CaptionVotingPanel({
       setActiveUndo(false)
       setUndoReminderVote(null)
       setMessage(null)
+      const feedbackPromise = runBackgroundFeedback(vote === 1 ? 'upvote' : 'downvote')
 
       const { data: existingVoteRow, error: existingVoteError } = await supabase
         .from('caption_votes')
@@ -343,20 +350,23 @@ export default function CaptionVotingPanel({
         return
       }
 
-      await runBackgroundFeedback(vote === 1 ? 'upvote' : 'downvote')
+      const updatedSeenIds = new Set(seenCaptionIds)
+      updatedSeenIds.add(currentCaption.id)
+      const nextIndex = findNextUnseenIndex(initialCaptions, updatedSeenIds, displayIndex + 1)
+      const incomingCaption = initialCaptions[nextIndex] ?? null
+      if (incomingCaption) {
+        dispatchBackgroundImage(getCaptionImageUrl(incomingCaption))
+      }
+
+      await feedbackPromise
 
       setLastVoteAction({
         index: displayIndex,
         vote,
       })
 
-      const updatedSeenIds = new Set(seenCaptionIds)
-      updatedSeenIds.add(currentCaption.id)
-      const nextIndex = findNextUnseenIndex(initialCaptions, updatedSeenIds, displayIndex + 1)
       setSeenCaptionIds(updatedSeenIds)
       setUndoIndex(null)
-
-      const incomingCaption = initialCaptions[nextIndex] ?? null
       if (incomingCaption) {
         await runTurnAnimation({
           direction: 'forward',
@@ -375,6 +385,7 @@ export default function CaptionVotingPanel({
     [
       currentCaption,
       currentCaptionImageUrl,
+      dispatchBackgroundImage,
       displayIndex,
       initialCaptions,
       runBackgroundFeedback,
@@ -426,6 +437,7 @@ export default function CaptionVotingPanel({
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (!isActive) return
       if (!keyboardControlsEnabled || event.defaultPrevented) return
       if (event.metaKey || event.ctrlKey || event.altKey) return
 
@@ -468,7 +480,7 @@ export default function CaptionVotingPanel({
     return () => {
       window.removeEventListener('keydown', handleKeyDown)
     }
-  }, [canVote, keyboardControlsEnabled, lastVoteAction, voteInFlight, handleUndo, handleVote])
+  }, [canVote, isActive, keyboardControlsEnabled, lastVoteAction, voteInFlight, handleUndo, handleVote])
 
   if (!seenLookupReady) {
     return (
@@ -659,11 +671,11 @@ export default function CaptionVotingPanel({
             <button
               type="button"
               onClick={handleUndo}
-              disabled={!lastVoteAction || voteInFlight}
+              disabled={!canUndo}
               className={`rounded-xl border px-3 py-1.5 transition-colors transition-transform ${
                 activeUndo
                   ? 'scale-[1.01] border-amber-500 bg-amber-500 text-white'
-                  : !lastVoteAction || voteInFlight
+                  : !canUndo
                   ? 'cursor-not-allowed border-slate-300 text-slate-400 dark:border-white/15'
                   : 'border-amber-400/40 bg-amber-500/15 text-amber-800 hover:bg-amber-500/25 dark:text-amber-100'
               }`}
@@ -674,7 +686,7 @@ export default function CaptionVotingPanel({
 
           <div className="mt-3 min-h-0 shrink-0 sm:mt-4">
             {message && (
-              <p className="rounded-lg border border-amber-500/45 bg-amber-500/15 px-3 py-2 text-sm text-amber-800 dark:text-amber-100">
+              <p className="rounded-xl border border-amber-500/45 bg-amber-500/15 px-3 py-2 text-sm text-amber-800 dark:text-amber-100">
                 {message}
               </p>
             )}

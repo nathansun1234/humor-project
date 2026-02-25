@@ -10,7 +10,7 @@ import {
 } from '@/lib/protected-settings'
 
 const ORIGIN_BACKGROUND_CLASS =
-  'pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_top,rgba(16,185,129,0.14),transparent_45%),radial-gradient(circle_at_bottom,rgba(14,165,233,0.12),transparent_40%)] dark:bg-[radial-gradient(circle_at_top,rgba(34,197,94,0.16),transparent_45%),radial-gradient(circle_at_bottom,rgba(14,165,233,0.14),transparent_40%)]'
+  'pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_top,rgba(16,185,129,0.08),transparent_48%),radial-gradient(circle_at_bottom,rgba(14,165,233,0.06),transparent_44%)] dark:bg-[radial-gradient(circle_at_top,rgba(34,197,94,0.1),transparent_48%),radial-gradient(circle_at_bottom,rgba(14,165,233,0.08),transparent_44%)]'
 
 export default function ProtectedBackgroundLayer() {
   // Keep initial server/client render deterministic to avoid hydration mismatch.

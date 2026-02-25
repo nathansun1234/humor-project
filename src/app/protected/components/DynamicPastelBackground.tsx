@@ -12,10 +12,7 @@ type BackgroundState = {
 const BACKGROUND_EVENT_NAME = 'protected:caption-image'
 const BACKGROUND_IMAGE_REQUEST_EVENT = 'protected:caption-image-request'
 const BACKGROUND_FEEDBACK_EVENT = 'protected:background-feedback'
-const FEEDBACK_FLASH_TRANSITION_MS = 320
-
-const FALLBACK_BACKGROUND =
-  'radial-gradient(circle at 18% 14%, rgba(56, 189, 248, 0.35), transparent 48%), radial-gradient(circle at 82% 82%, rgba(129, 140, 248, 0.32), transparent 44%), radial-gradient(circle at 84% 16%, rgba(251, 191, 36, 0.24), transparent 52%)'
+const FEEDBACK_FLASH_TRANSITION_MS = 420
 
 export default function DynamicPastelBackground() {
   const [backgroundState, setBackgroundState] = useState<BackgroundState>({
@@ -175,7 +172,10 @@ export default function DynamicPastelBackground() {
     ? 'blur(96px) saturate(0.9) contrast(0.98) brightness(0.5)'
     : 'blur(96px) saturate(0.9) contrast(0.94) brightness(1.18)'
   const overlayClassName = isDarkMode ? 'bg-black/60' : 'bg-white/52'
-  const baseClassName = isDarkMode ? 'bg-slate-900' : 'bg-slate-50'
+  const baseClassName = isDarkMode ? 'bg-slate-900' : 'bg-slate-100'
+  const originGradientClassName = isDarkMode
+    ? 'bg-[radial-gradient(circle_at_top,rgba(34,197,94,0.16),transparent_45%),radial-gradient(circle_at_bottom,rgba(14,165,233,0.14),transparent_40%)]'
+    : 'bg-[radial-gradient(circle_at_top,rgba(16,185,129,0.14),transparent_45%),radial-gradient(circle_at_bottom,rgba(14,165,233,0.12),transparent_40%)]'
   const textureOpacity = isDarkMode ? 0.06 : 0.05
   const firstLayerTransform = isDarkMode
     ? 'scale(1.3) rotate(-2.2deg) translate3d(-1.5%, -1%, 0)'
@@ -187,6 +187,7 @@ export default function DynamicPastelBackground() {
   return (
     <div className="pointer-events-none fixed inset-0">
       <div className={`absolute inset-0 ${baseClassName}`} />
+      <div className={`absolute inset-0 ${originGradientClassName}`} />
       <BackgroundImageLayer
         imageUrl={backgroundState.layers[0]}
         isActive={backgroundState.activeLayer === 0}
@@ -239,7 +240,7 @@ function BackgroundImageLayer({
       className="absolute inset-0 overflow-hidden transition-opacity duration-1000 ease-in-out"
       style={{ opacity: isActive ? 1 : 0 }}
     >
-      {imageUrl ? (
+      {imageUrl && (
         // Decorative blurred background layer; direct img avoids URL serialization issues in CSS backgrounds.
         // eslint-disable-next-line @next/next/no-img-element
         <img
@@ -253,23 +254,6 @@ function BackgroundImageLayer({
             width: '136%',
             height: '136%',
             maxWidth: 'none',
-            filter,
-            transform,
-            transformOrigin: 'center',
-          }}
-        />
-      ) : (
-        <div
-          className="absolute"
-          style={{
-            top: '-18%',
-            left: '-18%',
-            width: '136%',
-            height: '136%',
-            backgroundImage: FALLBACK_BACKGROUND,
-            backgroundPosition: 'center',
-            backgroundRepeat: 'no-repeat',
-            backgroundSize: '136% 136%',
             filter,
             transform,
             transformOrigin: 'center',
