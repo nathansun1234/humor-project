@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 type CaptionImageDetail = { imageUrl: string | null }
-type BackgroundFeedbackDetail = { kind: 'upvote' | 'downvote' | 'undo' }
+type BackgroundFeedbackDetail = { kind: 'upvote' | 'downvote' }
 type BackgroundState = {
   layers: [string | null, string | null]
   activeLayer: 0 | 1
@@ -88,11 +88,7 @@ export default function DynamicPastelBackground() {
       return darkMode ? 'rgba(16, 185, 129, 0.34)' : 'rgba(16, 185, 129, 0.5)'
     }
 
-    if (kind === 'downvote') {
-      return darkMode ? 'rgba(244, 63, 94, 0.34)' : 'rgba(244, 63, 94, 0.5)'
-    }
-
-    return darkMode ? 'rgba(245, 158, 11, 0.32)' : 'rgba(245, 158, 11, 0.46)'
+    return darkMode ? 'rgba(244, 63, 94, 0.34)' : 'rgba(244, 63, 94, 0.5)'
   }, [])
 
   const triggerFeedbackFlash = useCallback(

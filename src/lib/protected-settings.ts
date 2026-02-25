@@ -4,6 +4,8 @@ export type BooleanSettingEventDetail = {
 
 export const DYNAMIC_BACKGROUND_STORAGE_KEY = 'protected-dynamic-background'
 export const DYNAMIC_BACKGROUND_EVENT = 'protected:dynamic-background'
+export const KEYBOARD_CONTROLS_STORAGE_KEY = 'protected-keyboard-controls'
+export const KEYBOARD_CONTROLS_EVENT = 'protected:keyboard-controls'
 
 export function readStoredBoolean(settingKey: string, defaultValue: boolean): boolean {
   if (typeof window === 'undefined') {
