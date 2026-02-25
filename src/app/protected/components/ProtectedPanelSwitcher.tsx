@@ -75,7 +75,7 @@ export default function ProtectedPanelSwitcher({
   return (
     <>
       <div
-        className="fixed left-1/2 top-4 z-[110] w-[calc(100vw-2rem)] max-w-md -translate-x-1/2 sm:top-5"
+        className="fixed bottom-4 left-1/2 z-[110] w-[calc(100vw-2rem)] max-w-md -translate-x-1/2 sm:bottom-5"
       >
         <div
           role="group"

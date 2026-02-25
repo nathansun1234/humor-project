@@ -511,7 +511,7 @@ export default function CaptionVotingPanel({
   }) => (
     <section aria-hidden className={`${className} ${panelStackFrame} ${cardTheme} p-3 sm:p-5`}>
       <article className="min-h-0 flex-1 overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 p-3 dark:border-white/10 dark:bg-[#0d0d0d] sm:p-4">
-        <div className="grid h-full min-h-0 grid-rows-[82%_18%] gap-0">
+        <div className="grid h-full min-h-0 grid-rows-[86%_14%] gap-0 sm:grid-rows-[82%_18%]">
           <div className="min-h-0 rounded-t-xl rounded-b-none bg-slate-100 p-1 dark:bg-[#0d0d0d] sm:p-2">
             {imageUrl ? (
               <NextImage
@@ -608,7 +608,7 @@ export default function CaptionVotingPanel({
             key={currentCaption.id}
             className="min-h-0 flex-1 overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 p-3 opacity-100 transition-all duration-200 ease-out dark:border-white/10 dark:bg-[#0d0d0d] sm:p-4"
           >
-            <div className="grid h-full min-h-0 grid-rows-[82%_18%] gap-0">
+            <div className="grid h-full min-h-0 grid-rows-[86%_14%] gap-0 sm:grid-rows-[82%_18%]">
               <div className="min-h-0 rounded-t-xl rounded-b-none bg-slate-100 p-1 dark:bg-[#0d0d0d] sm:p-2">
                 {currentCaptionImageUrl ? (
                   <NextImage
