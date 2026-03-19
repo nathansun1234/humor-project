@@ -74,9 +74,7 @@ export default function ProtectedPanelSwitcher({
 
   return (
     <>
-      <div
-        className="fixed bottom-4 left-1/2 z-[110] w-[calc(100vw-2rem)] max-w-md -translate-x-1/2 sm:bottom-5"
-      >
+      <div className="fixed top-4 left-1/2 z-[110] w-[min(calc(100vw-1rem),44rem)] -translate-x-1/2 sm:top-6">
         <div
           role="group"
           aria-label="Protected page panel selector"

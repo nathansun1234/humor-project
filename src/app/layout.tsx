@@ -25,13 +25,21 @@ export default function RootLayout({
   const themeBootScript = `
     (() => {
       try {
-        // Reset per-load defaults: light theme + dynamic background enabled.
-        localStorage.setItem('ui-theme', 'light');
+        const storedTheme = localStorage.getItem('ui-theme');
+        const preference =
+          storedTheme === 'dark' || storedTheme === 'light' || storedTheme === 'system'
+            ? storedTheme
+            : 'system';
+        const prefersDark =
+          preference === 'system' &&
+          window.matchMedia &&
+          window.matchMedia('(prefers-color-scheme: dark)').matches;
+        const resolved = preference === 'system' ? (prefersDark ? 'dark' : 'light') : preference;
         localStorage.setItem('protected-dynamic-background', 'true');
-        const resolved = 'light';
         const root = document.documentElement;
         root.classList.toggle('dark', resolved === 'dark');
         root.style.colorScheme = resolved;
+        root.dataset.themePreference = preference;
       } catch {}
     })();
   `;

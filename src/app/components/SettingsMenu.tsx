@@ -14,7 +14,9 @@ import {
 } from '@/lib/protected-settings'
 
 const THEME_STORAGE_KEY = 'ui-theme'
+const THEME_PREFERENCES = ['system', 'light', 'dark'] as const
 type Theme = 'light' | 'dark'
+type ThemePreference = (typeof THEME_PREFERENCES)[number]
 type SettingsMenuProps = {
   showSignOut?: boolean
   showProtectedToggles?: boolean
@@ -22,10 +24,27 @@ type SettingsMenuProps = {
   profileId?: string | null
 }
 
-function applyTheme(theme: Theme) {
+function getSystemTheme(): Theme {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+    return 'light'
+  }
+
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+}
+
+function normalizeThemePreference(preference: string | null): ThemePreference {
+  return THEME_PREFERENCES.includes((preference ?? '') as ThemePreference)
+    ? (preference as ThemePreference)
+    : 'system'
+}
+
+function applyThemePreference(preference: ThemePreference): Theme {
+  const effectiveTheme = preference === 'system' ? getSystemTheme() : preference
   const root = document.documentElement
-  root.classList.toggle('dark', theme === 'dark')
-  root.style.colorScheme = theme
+  root.classList.toggle('dark', effectiveTheme === 'dark')
+  root.style.colorScheme = effectiveTheme
+  root.dataset.themePreference = preference
+  return effectiveTheme
 }
 
 export default function SettingsMenu({
@@ -35,7 +54,13 @@ export default function SettingsMenu({
   profileId = null,
 }: SettingsMenuProps) {
   const [isOpen, setIsOpen] = useState(false)
-  const [isDarkMode, setIsDarkMode] = useState(false)
+  const [themePreference, setThemePreference] = useState<ThemePreference>(() => {
+    if (typeof window === 'undefined') {
+      return 'system'
+    }
+
+    return normalizeThemePreference(window.localStorage.getItem(THEME_STORAGE_KEY))
+  })
   const [dynamicBackgroundEnabled, setDynamicBackgroundEnabled] = useState(() =>
     readStoredBoolean(DYNAMIC_BACKGROUND_STORAGE_KEY, true)
   )
@@ -57,20 +82,26 @@ export default function SettingsMenu({
   }, [])
 
   useEffect(() => {
-    const htmlElement = document.documentElement
-    const syncDarkMode = () => {
-      setIsDarkMode(htmlElement.classList.contains('dark'))
+    applyThemePreference(themePreference)
+  }, [themePreference])
+
+  useEffect(() => {
+    if (themePreference !== 'system') return
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return
+
+    const mediaQueryList = window.matchMedia('(prefers-color-scheme: dark)')
+    const handlePreferenceChange = () => {
+      applyThemePreference('system')
     }
 
-    syncDarkMode()
-
-    const observer = new MutationObserver(syncDarkMode)
-    observer.observe(htmlElement, { attributes: true, attributeFilter: ['class'] })
-
-    return () => {
-      observer.disconnect()
+    if (typeof mediaQueryList.addEventListener === 'function') {
+      mediaQueryList.addEventListener('change', handlePreferenceChange)
+      return () => mediaQueryList.removeEventListener('change', handlePreferenceChange)
     }
-  }, [])
+
+    mediaQueryList.addListener(handlePreferenceChange)
+    return () => mediaQueryList.removeListener(handlePreferenceChange)
+  }, [themePreference])
 
   useEffect(() => {
     if (!isOpen) return
@@ -106,11 +137,10 @@ export default function SettingsMenu({
     }
   }, [])
 
-  const handleToggleTheme = () => {
-    const nextTheme: Theme = isDarkMode ? 'light' : 'dark'
-    window.localStorage.setItem(THEME_STORAGE_KEY, nextTheme)
-    applyTheme(nextTheme)
-    setIsDarkMode(nextTheme === 'dark')
+  const handleThemeChange = (nextPreference: ThemePreference) => {
+    const normalizedPreference = normalizeThemePreference(nextPreference)
+    window.localStorage.setItem(THEME_STORAGE_KEY, normalizedPreference)
+    setThemePreference(normalizedPreference)
   }
 
   const handleToggleDynamicBackground = () => {
@@ -195,7 +225,7 @@ export default function SettingsMenu({
           isOpen ? 'pointer-events-auto translate-y-0 scale-100 opacity-100' : 'pointer-events-none -translate-y-1 scale-95 opacity-0'
         }`}
       >
-        <ToggleRow label="Dark mode" enabled={isDarkMode} onToggle={handleToggleTheme} />
+        <ThemeSegmentRow themePreference={themePreference} onChange={handleThemeChange} />
 
         {showProtectedToggles && (
           <>
@@ -310,6 +340,52 @@ function ToggleRow({
           }`}
         />
       </button>
+    </div>
+  )
+}
+
+function ThemeSegmentRow({
+  themePreference,
+  onChange,
+}: {
+  themePreference: ThemePreference
+  onChange: (nextPreference: ThemePreference) => void
+}) {
+  const activeThemeIndex = Math.max(THEME_PREFERENCES.indexOf(themePreference), 0)
+
+  return (
+    <div className="flex flex-col items-start gap-2">
+      <span className="text-sm font-medium text-slate-800 dark:text-neutral-100">Theme</span>
+      <div
+        role="radiogroup"
+        aria-label="Theme preference"
+        className="w-full rounded-full border border-slate-300 bg-slate-200/90 p-[3px] shadow-[0_8px_20px_-16px_rgba(15,23,42,0.42)] dark:border-white/15 dark:bg-[rgba(30,30,36,0.82)]"
+      >
+        <div className="relative grid min-h-8 grid-cols-3 items-stretch">
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-y-0 left-0 w-1/3 rounded-full bg-white shadow-[0_8px_14px_-12px_rgba(15,23,42,0.38),inset_0_0_0_1px_rgba(15,23,42,0.08)] transition-transform duration-[250ms] ease-[cubic-bezier(0.2,0.78,0.18,1)] dark:bg-[#050505] dark:shadow-[0_10px_22px_-12px_rgba(0,0,0,0.9),inset_0_0_0_1px_rgba(255,255,255,0.08)]"
+            style={{ transform: `translateX(${activeThemeIndex * 100}%)` }}
+          />
+          {THEME_PREFERENCES.map((preference) => {
+            const isActive = themePreference === preference
+            return (
+              <button
+                key={preference}
+                type="button"
+                role="radio"
+                aria-checked={isActive}
+                onClick={() => onChange(preference)}
+                className={`relative z-10 rounded-full bg-transparent px-1 py-[0.35rem] text-center text-[0.72rem] font-semibold tracking-[-0.01em] transition-colors ${
+                  isActive ? 'text-slate-900 dark:text-slate-50' : 'text-slate-600 dark:text-slate-300'
+                }`}
+              >
+                {preference.charAt(0).toUpperCase() + preference.slice(1)}
+              </button>
+            )
+          })}
+        </div>
+      </div>
     </div>
   )
 }

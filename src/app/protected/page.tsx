@@ -20,6 +20,8 @@ type ImageRecord = {
     url?: string | null
 }
 
+const IMAGE_LOOKUP_CHUNK_SIZE = 50
+
 function shuffleCaptions(captions: CaptionRecord[]): CaptionRecord[] {
     const shuffled = [...captions]
 
@@ -56,15 +58,19 @@ export default async function ProtectedPage() {
     const imageUrlById = new Map<string, string | null>()
 
     if (imageIds.length > 0) {
-        const { data: imageRows, error: imageError } = await supabase
-            .from('images')
-            .select('id,url')
-            .in('id', imageIds)
-            .eq('is_public', true)
+        for (let index = 0; index < imageIds.length; index += IMAGE_LOOKUP_CHUNK_SIZE) {
+            const imageIdChunk = imageIds.slice(index, index + IMAGE_LOOKUP_CHUNK_SIZE)
+            const { data: imageRows, error: imageError } = await supabase
+                .from('images')
+                .select('id,url')
+                .in('id', imageIdChunk)
+                .eq('is_public', true)
 
-        if (imageError) {
-            imageLookupError = imageError.message
-        } else {
+            if (imageError) {
+                imageLookupError = imageError.message
+                break
+            }
+
             for (const image of ((imageRows ?? []) as ImageRecord[])) {
                 imageUrlById.set(image.id, image.url ?? null)
             }
