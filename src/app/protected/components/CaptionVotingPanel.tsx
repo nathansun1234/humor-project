@@ -320,14 +320,12 @@ export default function CaptionVotingPanel({
         return
       }
 
-      const now = new Date().toISOString()
-
       const votePayload = {
         profile_id: userId,
         caption_id: currentCaption.id,
         vote_value: vote,
-        created_datetime_utc: now,
-        modified_datetime_utc: now,
+        created_by_user_id: userId,
+        modified_by_user_id: userId,
       }
 
       const hasExistingVoteRow = Boolean(existingVoteRow)
@@ -337,7 +335,7 @@ export default function CaptionVotingPanel({
               .from('caption_votes')
               .update({
                 vote_value: vote,
-                modified_datetime_utc: now,
+                modified_by_user_id: userId,
               })
               .eq('caption_id', currentCaption.id)
               .eq('profile_id', userId)
