@@ -32,6 +32,10 @@ function getCaptionText(caption: CaptionRecord): string | null {
     return null
 }
 
+function isNonNull<T>(value: T | null): value is T {
+    return value !== null
+}
+
 function shuffleCaptions(captions: CaptionRecord[]): CaptionRecord[] {
     const shuffled = [...captions]
 
@@ -110,7 +114,7 @@ export default async function ProtectedPage() {
                 image_url: resolvedImageUrl,
             }
         })
-        .filter((caption): caption is CaptionRecord => caption !== null)
+        .filter(isNonNull)
 
     const loadErrorMessage = [
         error ? `Error loading captions: ${error.message}` : null,
