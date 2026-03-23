@@ -266,18 +266,33 @@ export default function GenerateCaptionsPanel({ isActive = true }: { isActive?: 
 }
 
 async function getAccessToken(supabase: ReturnType<typeof createClient>): Promise<string> {
-  const { data, error } = await supabase.auth.getSession()
+  try {
+    const { data, error } = await supabase.auth.getSession()
 
-  if (error) {
-    throw new Error(`Could not read current session: ${error.message}`)
+    if (error) {
+      await safeSignOut(supabase)
+      throw new Error('Your session expired. Please sign in again.')
+    }
+
+    const token = data.session?.access_token
+    if (!token) {
+      await safeSignOut(supabase)
+      throw new Error('No JWT access token found. Please sign in again.')
+    }
+
+    return token
+  } catch {
+    await safeSignOut(supabase)
+    throw new Error('Your session expired. Please sign in again.')
   }
+}
 
-  const token = data.session?.access_token
-  if (!token) {
-    throw new Error('No JWT access token found. Please sign in again.')
+async function safeSignOut(supabase: ReturnType<typeof createClient>): Promise<void> {
+  try {
+    await supabase.auth.signOut()
+  } catch {
+    // Ignore sign-out failures caused by stale refresh tokens.
   }
-
-  return token
 }
 
 async function postJson<TResponse>(

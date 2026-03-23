@@ -184,23 +184,38 @@ export default function CaptionVotingPanel({
     [supabase]
   )
 
+  const handleExpiredSession = useCallback(async () => {
+    try {
+      await supabase.auth.signOut()
+    } catch {
+      // Ignore sign-out failures caused by stale refresh tokens.
+    }
+
+    setUserId(null)
+    setMessage('Your session expired. Please sign in again.')
+  }, [supabase])
+
   useEffect(() => {
     let cancelled = false
 
     const syncSession = async () => {
-      const { data, error } = await supabase.auth.getSession()
+      try {
+        const { data, error } = await supabase.auth.getSession()
 
-      if (error) {
-        await supabase.auth.signOut()
-        if (!cancelled) {
-          setUserId(null)
-          setMessage('Your session expired. Please sign in again.')
+        if (error) {
+          if (!cancelled) {
+            await handleExpiredSession()
+          }
+          return
         }
-        return
-      }
 
-      if (!cancelled) {
-        setUserId(data.session?.user?.id ?? null)
+        if (!cancelled) {
+          setUserId(data.session?.user?.id ?? null)
+        }
+      } catch {
+        if (!cancelled) {
+          await handleExpiredSession()
+        }
       }
     }
 
@@ -208,7 +223,7 @@ export default function CaptionVotingPanel({
     return () => {
       cancelled = true
     }
-  }, [supabase])
+  }, [handleExpiredSession, supabase])
 
   useEffect(() => {
     let cancelled = false
@@ -521,14 +536,12 @@ export default function CaptionVotingPanel({
                 unoptimized
               />
             ) : (
-              <div className={`flex h-full items-center justify-center rounded-xl text-sm ${mutedText}`}>
-                No image available
-              </div>
+              <div className={`h-full rounded-xl ${mutedText}`} />
             )}
           </div>
           <div className="min-h-0 overflow-y-auto rounded-b-xl rounded-t-none bg-slate-100 px-3 py-3 dark:bg-[#0d0d0d] sm:px-4">
             <p className="text-center text-lg leading-relaxed sm:text-xl">
-              {caption.content || caption.title || 'Untitled caption'}
+              {getCaptionText(caption)}
             </p>
           </div>
         </div>
@@ -619,14 +632,12 @@ export default function CaptionVotingPanel({
                     unoptimized
                   />
                 ) : (
-                  <div className={`flex h-full items-center justify-center rounded-xl text-sm ${mutedText}`}>
-                    No image available
-                  </div>
+                  <div className={`h-full rounded-xl ${mutedText}`} />
                 )}
               </div>
               <div className="min-h-0 overflow-y-auto rounded-b-xl rounded-t-none bg-slate-100 px-3 py-3 dark:bg-[#0d0d0d] sm:px-4">
                 <p className="text-center text-lg leading-relaxed sm:text-xl">
-                  {currentCaption.content || currentCaption.title || 'Untitled caption'}
+                  {getCaptionText(currentCaption)}
                 </p>
               </div>
             </div>
@@ -712,4 +723,14 @@ function getCaptionImageUrl(caption: CaptionRecord): string | null {
   if (caption.image_url) return caption.image_url
   if (caption.imageUrl) return caption.imageUrl
   return null
+}
+
+function getCaptionText(caption: CaptionRecord): string {
+  const content = caption.content?.trim()
+  if (content) return content
+
+  const title = caption.title?.trim()
+  if (title) return title
+
+  return ''
 }

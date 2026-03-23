@@ -8,7 +8,11 @@ export default function SignOutButton({ className }: { className?: string }) {
   const supabase = createClient()
 
   const handleSignOut = async () => {
-    await supabase.auth.signOut()
+    try {
+      await supabase.auth.signOut()
+    } catch {
+      // Ignore sign-out failures caused by stale refresh tokens.
+    }
     router.push('/') // Redirect to home page after sign out
   }
 

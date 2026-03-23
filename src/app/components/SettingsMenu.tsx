@@ -24,6 +24,18 @@ type SettingsMenuProps = {
   profileId?: string | null
 }
 
+function readStoredThemePreference(): ThemePreference {
+  if (typeof window === 'undefined') {
+    return 'system'
+  }
+
+  try {
+    return normalizeThemePreference(window.localStorage.getItem(THEME_STORAGE_KEY))
+  } catch {
+    return 'system'
+  }
+}
+
 function getSystemTheme(): Theme {
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
     return 'light'
@@ -54,19 +66,9 @@ export default function SettingsMenu({
   profileId = null,
 }: SettingsMenuProps) {
   const [isOpen, setIsOpen] = useState(false)
-  const [themePreference, setThemePreference] = useState<ThemePreference>(() => {
-    if (typeof window === 'undefined') {
-      return 'system'
-    }
-
-    return normalizeThemePreference(window.localStorage.getItem(THEME_STORAGE_KEY))
-  })
-  const [dynamicBackgroundEnabled, setDynamicBackgroundEnabled] = useState(() =>
-    readStoredBoolean(DYNAMIC_BACKGROUND_STORAGE_KEY, true)
-  )
-  const [keyboardControlsEnabled, setKeyboardControlsEnabled] = useState(() =>
-    readStoredBoolean(KEYBOARD_CONTROLS_STORAGE_KEY, true)
-  )
+  const [themePreference, setThemePreference] = useState<ThemePreference>('system')
+  const [dynamicBackgroundEnabled, setDynamicBackgroundEnabled] = useState(true)
+  const [keyboardControlsEnabled, setKeyboardControlsEnabled] = useState(true)
   const [keyboardInfoOpen, setKeyboardInfoOpen] = useState(false)
   const keyboardInfoCloseTimeoutRef = useRef<number | null>(null)
   const panelRef = useRef<HTMLDivElement | null>(null)
@@ -84,6 +86,18 @@ export default function SettingsMenu({
   useEffect(() => {
     applyThemePreference(themePreference)
   }, [themePreference])
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      setThemePreference(readStoredThemePreference())
+      setDynamicBackgroundEnabled(readStoredBoolean(DYNAMIC_BACKGROUND_STORAGE_KEY, true))
+      setKeyboardControlsEnabled(readStoredBoolean(KEYBOARD_CONTROLS_STORAGE_KEY, true))
+    })
+
+    return () => {
+      window.cancelAnimationFrame(frame)
+    }
+  }, [])
 
   useEffect(() => {
     if (themePreference !== 'system') return
@@ -177,7 +191,11 @@ export default function SettingsMenu({
 
   const handleSignOut = async () => {
     const supabase = createClient()
-    await supabase.auth.signOut()
+    try {
+      await supabase.auth.signOut()
+    } catch {
+      // Ignore sign-out failures caused by stale refresh tokens.
+    }
     router.replace('/')
   }
 

@@ -22,6 +22,16 @@ type ImageRecord = {
 
 const IMAGE_LOOKUP_CHUNK_SIZE = 50
 
+function getCaptionText(caption: CaptionRecord): string | null {
+    const content = caption.content?.trim()
+    if (content) return content
+
+    const title = caption.title?.trim()
+    if (title) return title
+
+    return null
+}
+
 function shuffleCaptions(captions: CaptionRecord[]): CaptionRecord[] {
     const shuffled = [...captions]
 
@@ -77,21 +87,30 @@ export default async function ProtectedPage() {
         }
     }
 
-    const hydratedCaptions = baseCaptions.map((caption) => {
-        if (!caption.image_id) {
-            return caption
-        }
+    const hydratedCaptions = baseCaptions
+        .map((caption) => {
+            const captionText = getCaptionText(caption)
+            if (!captionText) {
+                return null
+            }
 
-        const resolvedImageUrl = imageUrlById.get(caption.image_id)
-        if (resolvedImageUrl === undefined) {
-            return caption
-        }
+            if (!caption.image_id) {
+                return null
+            }
 
-        return {
-            ...caption,
-            image_url: caption.image_url ?? resolvedImageUrl,
-        }
-    })
+            const resolvedImageUrl = imageUrlById.get(caption.image_id) ?? null
+            if (!resolvedImageUrl) {
+                return null
+            }
+
+            return {
+                ...caption,
+                content: caption.content?.trim() ? caption.content : captionText,
+                title: caption.title?.trim() ? caption.title : null,
+                image_url: resolvedImageUrl,
+            }
+        })
+        .filter((caption): caption is CaptionRecord => caption !== null)
 
     const loadErrorMessage = [
         error ? `Error loading captions: ${error.message}` : null,
