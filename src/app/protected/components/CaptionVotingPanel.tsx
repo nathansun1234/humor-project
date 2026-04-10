@@ -22,7 +22,9 @@ type CaptionRecord = {
 
 type VoteValue = -1 | 1
 type SeenVoteRow = { caption_id: string }
-type UndoSnapshot = { index: number; vote: VoteValue }
+type UndoSnapshot =
+  | { action: 'vote'; index: number; vote: VoteValue; captionId: string }
+  | { action: 'skip'; index: number }
 type TurnDirection = 'forward' | 'backward'
 type TurnState = {
   direction: TurnDirection
@@ -51,6 +53,15 @@ function findNextUnseenIndex(captions: CaptionRecord[], seenIds: Set<string>, st
   return captions.length
 }
 
+function isAbortLookupError(message: string | undefined): boolean {
+  if (!message) {
+    return false
+  }
+
+  const normalizedMessage = message.toLowerCase()
+  return normalizedMessage.includes('aborterror') || normalizedMessage.includes('aborted')
+}
+
 export default function CaptionVotingPanel({
   initialCaptions,
   initialUserId,
@@ -67,11 +78,12 @@ export default function CaptionVotingPanel({
   const [voteInFlight, setVoteInFlight] = useState(false)
   const [activeVote, setActiveVote] = useState<VoteValue | null>(null)
   const [activeUndo, setActiveUndo] = useState(false)
+  const [activeSkip, setActiveSkip] = useState(false)
   const [userId, setUserId] = useState<string | null>(initialUserId)
   const [message, setMessage] = useState<string | null>(null)
   const [seenCaptionIds, setSeenCaptionIds] = useState<Set<string>>(new Set())
   const [seenLookupReady, setSeenLookupReady] = useState(false)
-  const [lastVoteAction, setLastVoteAction] = useState<UndoSnapshot | null>(null)
+  const [voteHistory, setVoteHistory] = useState<UndoSnapshot[]>([])
   const [undoReminderVote, setUndoReminderVote] = useState<VoteValue | null>(null)
   const [keyboardControlsEnabled, setKeyboardControlsEnabled] = useState(() =>
     readStoredBoolean(KEYBOARD_CONTROLS_STORAGE_KEY, true)
@@ -93,16 +105,18 @@ export default function CaptionVotingPanel({
   const previousCaptionImageUrl = previousCaption ? getCaptionImageUrl(previousCaption) : null
   const nextCaptionImageUrl = nextCaption ? getCaptionImageUrl(nextCaption) : null
   const isTurning = turnState !== null
+  const lastVoteAction = voteHistory[voteHistory.length - 1] ?? null
   const hasUndoHistory = Boolean(lastVoteAction)
   const canUndo = hasUndoHistory && !voteInFlight
+  const canSkip = Boolean(currentCaption) && !voteInFlight && !isTurning && seenLookupReady
   const showPreviousStackPanel = previousCaption !== null && undoIndex === null && hasUndoHistory
   const canVote = Boolean(userId) && Boolean(currentCaption) && !voteInFlight && !isTurning && seenLookupReady
   const cardTheme =
-    'border-slate-200 bg-white text-slate-900 dark:border-white/10 dark:bg-black dark:text-slate-100'
-  const mutedText = 'text-slate-600 dark:text-slate-300'
-  const panelFrame = 'mx-auto flex h-[77dvh] w-full max-w-2xl flex-col rounded-2xl border shadow-2xl backdrop-blur'
+    'border-slate-200 bg-white text-slate-900 dark:border-slate-300/25 dark:bg-slate-900/90 dark:text-slate-100'
+  const mutedText = 'text-slate-600 dark:text-slate-200'
+  const panelFrame = 'mx-auto flex h-[77dvh] w-full max-w-3xl flex-col rounded-2xl border shadow-2xl backdrop-blur'
   const panelStackFrame = 'flex h-full w-full flex-col rounded-2xl border shadow-2xl backdrop-blur'
-  const panelStackStage = 'relative mx-auto h-[77dvh] w-full max-w-2xl'
+  const panelStackStage = 'relative mx-auto h-[77dvh] w-full max-w-3xl'
 
   const clearTurnAnimation = useCallback(() => {
     if (turnTimeoutRef.current !== null) {
@@ -169,16 +183,27 @@ export default function CaptionVotingPanel({
 
   const fetchSeenCaptionIds = useCallback(
     async (profileId: string) => {
-      const { data, error } = await supabase
-        .from('caption_votes')
-        .select('caption_id')
-        .eq('profile_id', profileId)
+      const runLookup = () =>
+        supabase
+          .from('caption_votes')
+          .select('caption_id')
+          .eq('profile_id', profileId)
 
-      if (error) {
-        return { seenIds: new Set<string>(), errorMessage: error.message }
+      let lookupResult = await runLookup()
+
+      if (lookupResult.error && isAbortLookupError(lookupResult.error.message)) {
+        lookupResult = await runLookup()
       }
 
-      const seenIds = new Set((data as SeenVoteRow[] | null)?.map((row) => row.caption_id) ?? [])
+      if (lookupResult.error) {
+        if (isAbortLookupError(lookupResult.error.message)) {
+          return { seenIds: new Set<string>(), errorMessage: null as string | null }
+        }
+
+        return { seenIds: new Set<string>(), errorMessage: lookupResult.error.message }
+      }
+
+      const seenIds = new Set((lookupResult.data as SeenVoteRow[] | null)?.map((row) => row.caption_id) ?? [])
       return { seenIds, errorMessage: null as string | null }
     },
     [supabase]
@@ -234,6 +259,8 @@ export default function CaptionVotingPanel({
       if (!userId) {
         setCurrentIndex(0)
         setUndoIndex(null)
+        setVoteHistory([])
+        setUndoReminderVote(null)
         setSeenLookupReady(true)
         return
       }
@@ -248,6 +275,8 @@ export default function CaptionVotingPanel({
       setSeenCaptionIds(seenIds)
       setCurrentIndex(findNextUnseenIndex(initialCaptions, seenIds, 0))
       setUndoIndex(null)
+      setVoteHistory([])
+      setUndoReminderVote(null)
       setSeenLookupReady(true)
     }
 
@@ -317,6 +346,7 @@ export default function CaptionVotingPanel({
       setVoteInFlight(true)
       setActiveVote(vote)
       setActiveUndo(false)
+      setActiveSkip(false)
       setUndoReminderVote(null)
       setMessage(null)
       const feedbackPromise = runBackgroundFeedback(vote === 1 ? 'upvote' : 'downvote')
@@ -373,11 +403,6 @@ export default function CaptionVotingPanel({
 
       await feedbackPromise
 
-      setLastVoteAction({
-        index: displayIndex,
-        vote,
-      })
-
       setSeenCaptionIds(updatedSeenIds)
       setUndoIndex(null)
       if (incomingCaption) {
@@ -390,6 +415,15 @@ export default function CaptionVotingPanel({
         })
       }
 
+      setVoteHistory((currentHistory) => [
+        ...currentHistory,
+        {
+          action: 'vote',
+          index: displayIndex,
+          vote,
+          captionId: currentCaption.id,
+        },
+      ])
       setCurrentIndex(nextIndex)
       setActiveVote(null)
       setVoteInFlight(false)
@@ -417,7 +451,8 @@ export default function CaptionVotingPanel({
     const previousAction = lastVoteAction
     setVoteInFlight(true)
     setActiveUndo(true)
-    setLastVoteAction(null)
+    setActiveSkip(false)
+    setVoteHistory((currentHistory) => currentHistory.slice(0, -1))
     setActiveVote(null)
     setMessage(null)
 
@@ -432,9 +467,18 @@ export default function CaptionVotingPanel({
       })
     }
 
+    setSeenCaptionIds((currentSeen) => {
+      if (previousAction.action !== 'vote') {
+        return currentSeen
+      }
+
+      const updatedSeen = new Set(currentSeen)
+      updatedSeen.delete(previousAction.captionId)
+      return updatedSeen
+    })
     setCurrentIndex(previousAction.index)
     setUndoIndex(previousAction.index)
-    setUndoReminderVote(previousAction.vote)
+    setUndoReminderVote(previousAction.action === 'vote' ? previousAction.vote : null)
     setVoteInFlight(false)
     setActiveUndo(false)
     finishTurnAnimation()
@@ -446,6 +490,53 @@ export default function CaptionVotingPanel({
     lastVoteAction,
     runTurnAnimation,
     voteInFlight,
+  ])
+
+  const handleSkip = useCallback(async () => {
+    if (!canSkip || !currentCaption) return
+
+    setVoteInFlight(true)
+    setActiveSkip(true)
+    setActiveUndo(false)
+    setActiveVote(null)
+    setUndoReminderVote(null)
+    setMessage(null)
+
+    const nextIndex = findNextUnseenIndex(initialCaptions, seenCaptionIds, displayIndex + 1)
+    const incomingCaption = initialCaptions[nextIndex] ?? null
+    if (incomingCaption) {
+      dispatchBackgroundImage(getCaptionImageUrl(incomingCaption))
+      await runTurnAnimation({
+        direction: 'forward',
+        outgoingCaption: currentCaption,
+        outgoingImageUrl: currentCaptionImageUrl,
+        incomingCaption,
+        incomingImageUrl: getCaptionImageUrl(incomingCaption),
+      })
+    }
+
+    setVoteHistory((currentHistory) => [
+      ...currentHistory,
+      {
+        action: 'skip',
+        index: displayIndex,
+      },
+    ])
+    setUndoIndex(null)
+    setCurrentIndex(nextIndex)
+    setVoteInFlight(false)
+    setActiveSkip(false)
+    finishTurnAnimation()
+  }, [
+    canSkip,
+    currentCaption,
+    currentCaptionImageUrl,
+    dispatchBackgroundImage,
+    displayIndex,
+    finishTurnAnimation,
+    initialCaptions,
+    runTurnAnimation,
+    seenCaptionIds,
   ])
 
   useEffect(() => {
@@ -486,6 +577,13 @@ export default function CaptionVotingPanel({
         if (!lastVoteAction || voteInFlight) return
         event.preventDefault()
         void handleUndo()
+        return
+      }
+
+      if (event.key === 'ArrowRight') {
+        if (!canSkip) return
+        event.preventDefault()
+        void handleSkip()
       }
     }
 
@@ -493,7 +591,7 @@ export default function CaptionVotingPanel({
     return () => {
       window.removeEventListener('keydown', handleKeyDown)
     }
-  }, [canVote, isActive, keyboardControlsEnabled, lastVoteAction, voteInFlight, handleUndo, handleVote])
+  }, [canSkip, canVote, isActive, keyboardControlsEnabled, lastVoteAction, voteInFlight, handleSkip, handleUndo, handleVote])
 
   if (!seenLookupReady) {
     return (
@@ -508,7 +606,9 @@ export default function CaptionVotingPanel({
     return (
       <section className={`${panelFrame} p-5 sm:p-6 ${cardTheme}`}>
         <p className="text-lg font-medium">No more unseen captions to vote on right now.</p>
-        <p className={`mt-2 text-sm ${mutedText}`}>Check back later after more captions are added.</p>
+        <p className={`mt-2 text-sm ${mutedText}`}>
+          Switch to Generate Captions to create more, then return here to keep voting.
+        </p>
       </section>
     )
   }
@@ -523,9 +623,9 @@ export default function CaptionVotingPanel({
     className: string
   }) => (
     <section aria-hidden className={`${className} ${panelStackFrame} ${cardTheme} p-3 sm:p-5`}>
-      <article className="min-h-0 flex-1 overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 p-3 dark:border-white/10 dark:bg-[#0d0d0d] sm:p-4">
-        <div className="grid h-full min-h-0 grid-rows-[78%_22%] gap-0 sm:grid-rows-[82%_18%]">
-          <div className="min-h-0 rounded-t-xl rounded-b-none bg-slate-100 p-1 dark:bg-[#0d0d0d] sm:p-2">
+      <article className="min-h-0 flex-1 overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 p-3 dark:border-slate-300/20 dark:bg-slate-950/80 sm:p-4">
+        <div className="grid h-full min-h-0 grid-rows-[minmax(0,80%)_minmax(0,20%)] gap-0">
+          <div className="min-h-0 rounded-t-xl rounded-b-none bg-slate-100 p-1 dark:bg-slate-950/80 sm:p-2">
             {imageUrl ? (
               <NextImage
                 src={imageUrl}
@@ -539,8 +639,8 @@ export default function CaptionVotingPanel({
               <div className={`h-full rounded-xl ${mutedText}`} />
             )}
           </div>
-          <div className="min-h-0 overflow-y-auto rounded-b-xl rounded-t-none bg-slate-100 px-3 py-3 dark:bg-[#0d0d0d] sm:px-4">
-            <p className="text-center text-lg leading-relaxed sm:text-xl">
+          <div className="min-h-0 overflow-hidden rounded-b-xl rounded-t-none bg-slate-100 px-3 py-2 dark:bg-slate-950/80 sm:px-4 sm:py-2.5">
+            <p className="text-center text-base leading-relaxed sm:text-lg">
               {getCaptionText(caption)}
             </p>
           </div>
@@ -566,13 +666,20 @@ export default function CaptionVotingPanel({
         </div>
       </div>
 
-      <div className="mt-3 flex h-8 shrink-0 items-center justify-center text-sm">
+      <div className="mt-3 flex shrink-0 items-center justify-center gap-2 text-sm">
         <button
           type="button"
           disabled
           className="cursor-not-allowed rounded-xl border border-slate-300 px-3 py-1.5 text-slate-400 dark:border-white/15"
         >
           Go back
+        </button>
+        <button
+          type="button"
+          disabled
+          className="cursor-not-allowed rounded-xl border border-slate-300 px-3 py-1.5 text-slate-400 dark:border-white/15"
+        >
+          Skip
         </button>
       </div>
 
@@ -617,10 +724,10 @@ export default function CaptionVotingPanel({
         <section className={`relative z-20 ${panelStackFrame} ${cardTheme} p-3 sm:p-5`}>
           <article
             key={currentCaption.id}
-            className="min-h-0 flex-1 overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 p-3 opacity-100 transition-all duration-200 ease-out dark:border-white/10 dark:bg-[#0d0d0d] sm:p-4"
+            className="min-h-0 flex-1 overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 p-3 opacity-100 transition-all duration-200 ease-out dark:border-slate-300/20 dark:bg-slate-950/80 sm:p-4"
           >
-            <div className="grid h-full min-h-0 grid-rows-[78%_22%] gap-0 sm:grid-rows-[82%_18%]">
-              <div className="min-h-0 rounded-t-xl rounded-b-none bg-slate-100 p-1 dark:bg-[#0d0d0d] sm:p-2">
+            <div className="grid h-full min-h-0 grid-rows-[minmax(0,80%)_minmax(0,20%)] gap-0">
+              <div className="min-h-0 rounded-t-xl rounded-b-none bg-slate-100 p-1 dark:bg-slate-950/80 sm:p-2">
                 {currentCaptionImageUrl ? (
                   <NextImage
                     src={currentCaptionImageUrl}
@@ -635,15 +742,15 @@ export default function CaptionVotingPanel({
                   <div className={`h-full rounded-xl ${mutedText}`} />
                 )}
               </div>
-              <div className="min-h-0 overflow-y-auto rounded-b-xl rounded-t-none bg-slate-100 px-3 py-3 dark:bg-[#0d0d0d] sm:px-4">
-                <p className="text-center text-lg leading-relaxed sm:text-xl">
+              <div className="min-h-0 overflow-hidden rounded-b-xl rounded-t-none bg-slate-100 px-3 py-2 dark:bg-slate-950/80 sm:px-4 sm:py-2.5">
+                <p className="text-center text-base leading-relaxed sm:text-lg">
                   {getCaptionText(currentCaption)}
                 </p>
               </div>
             </div>
           </article>
 
-          <div className="mt-4 shrink-0 px-3 sm:px-4">
+          <div className="mt-3 shrink-0 px-3 sm:px-4">
             <div className="flex w-full gap-2.5">
               <button
                 type="button"
@@ -676,7 +783,7 @@ export default function CaptionVotingPanel({
             </div>
           </div>
 
-          <div className="mt-3 flex h-8 shrink-0 items-center justify-center text-sm">
+          <div className="mt-3 flex shrink-0 items-center justify-center gap-2 text-sm">
             <button
               type="button"
               onClick={handleUndo}
@@ -690,6 +797,20 @@ export default function CaptionVotingPanel({
               }`}
             >
               Go back
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleSkip()}
+              disabled={!canSkip}
+              className={`rounded-xl border px-3 py-1.5 transition-colors transition-transform ${
+                activeSkip
+                  ? 'scale-[1.01] border-sky-500 bg-sky-500 text-white'
+                  : !canSkip
+                    ? 'cursor-not-allowed border-slate-300 text-slate-400 dark:border-white/15'
+                    : 'border-sky-400/40 bg-sky-500/15 text-sky-800 hover:bg-sky-500/25 dark:text-sky-100'
+              }`}
+            >
+              Skip
             </button>
           </div>
 

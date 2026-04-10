@@ -28,6 +28,13 @@ type RegisterImageResponse = {
 
 type CaptionPipelineRecord = Record<string, unknown> | string
 type CaptionImageDetail = { imageUrl: string | null }
+type CaptionGenerationRun = {
+  id: string
+  createdAt: number
+  imageUrl: string | null
+  fileName: string | null
+  captions: CaptionPipelineRecord[]
+}
 
 export default function GenerateCaptionsPanel({ isActive = true }: { isActive?: boolean }) {
   const supabase = useMemo(() => createClient(), [])
@@ -36,7 +43,7 @@ export default function GenerateCaptionsPanel({ isActive = true }: { isActive?: 
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [localPreviewUrl, setLocalPreviewUrl] = useState<string | null>(null)
   const [uploadedImageUrl, setUploadedImageUrl] = useState<string | null>(null)
-  const [captions, setCaptions] = useState<CaptionPipelineRecord[]>([])
+  const [captionRuns, setCaptionRuns] = useState<CaptionGenerationRun[]>([])
   const [statusMessage, setStatusMessage] = useState('Select an image to generate captions.')
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -56,6 +63,16 @@ export default function GenerateCaptionsPanel({ isActive = true }: { isActive?: 
   }, [selectedFile])
 
   const imagePreviewUrl = uploadedImageUrl ?? localPreviewUrl
+  const totalGeneratedCaptions = useMemo(
+    () => captionRuns.reduce((runningTotal, run) => runningTotal + run.captions.length, 0),
+    [captionRuns]
+  )
+  const generateButtonLabel = isSubmitting
+    ? 'Generating...'
+    : captionRuns.length > 0
+      ? 'Generate More (keep previous)'
+      : 'Generate Captions'
+
   const dispatchBackgroundImage = useCallback((imageUrl: string | null) => {
     window.dispatchEvent(
       new CustomEvent<CaptionImageDetail>(BACKGROUND_EVENT_NAME, {
@@ -68,9 +85,14 @@ export default function GenerateCaptionsPanel({ isActive = true }: { isActive?: 
     const nextFile = event.target.files?.[0] ?? null
     setSelectedFile(nextFile)
     setUploadedImageUrl(null)
-    setCaptions([])
     setErrorMessage(null)
-    setStatusMessage(nextFile ? 'Image selected. Ready to upload and generate captions.' : 'Select an image to generate captions.')
+    setStatusMessage(
+      nextFile
+        ? captionRuns.length > 0
+          ? 'Image selected. Next step: click "Generate More (keep previous)".'
+          : 'Image selected. Next step: click "Generate Captions".'
+        : 'Select an image to generate captions.'
+    )
   }
 
   const handleChooseFile = () => {
@@ -106,8 +128,6 @@ export default function GenerateCaptionsPanel({ isActive = true }: { isActive?: 
     }
 
     setIsSubmitting(true)
-    setCaptions([])
-    setUploadedImageUrl(null)
     setErrorMessage(null)
 
     try {
@@ -158,11 +178,19 @@ export default function GenerateCaptionsPanel({ isActive = true }: { isActive?: 
       )
 
       const generatedCaptions = normalizeCaptionsResponse(captionsResponse)
-      setCaptions(generatedCaptions)
+      const nextRunCount = captionRuns.length + 1
+      const nextRun: CaptionGenerationRun = {
+        id: createGenerationRunId(),
+        createdAt: Date.now(),
+        imageUrl: presignedData.cdnUrl,
+        fileName: selectedFile.name,
+        captions: generatedCaptions,
+      }
+      setCaptionRuns((currentRuns) => [nextRun, ...currentRuns])
       setStatusMessage(
         generatedCaptions.length > 0
-          ? `Generated ${generatedCaptions.length} caption${generatedCaptions.length === 1 ? '' : 's'}.`
-          : 'Caption generation returned no records.'
+          ? `Added ${generatedCaptions.length} caption${generatedCaptions.length === 1 ? '' : 's'} (run ${nextRunCount}).`
+          : `Saved run ${nextRunCount}, but caption generation returned no records.`
       )
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unexpected error while generating captions.'
@@ -174,11 +202,18 @@ export default function GenerateCaptionsPanel({ isActive = true }: { isActive?: 
   }
 
   return (
-    <section className="mx-auto flex h-[77dvh] w-full max-w-4xl flex-col rounded-2xl border border-slate-200 bg-white p-3 shadow-2xl backdrop-blur dark:border-white/10 dark:bg-black sm:p-5">
+    <section className="mx-auto flex h-[77dvh] w-full max-w-5xl flex-col rounded-2xl border border-slate-200 bg-white p-3 shadow-2xl backdrop-blur dark:border-slate-300/25 dark:bg-slate-900/90 sm:p-5">
       <div className="flex h-full min-h-0 flex-col">
         <article className="grid min-h-0 flex-1 grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
-          <div className="flex min-h-0 flex-col rounded-xl border border-slate-200 bg-slate-100 p-3 dark:border-white/10 dark:bg-[#0d0d0d] sm:p-4">
-            <div className="min-h-0 flex-1 overflow-hidden rounded-xl border border-slate-300 bg-white dark:border-white/10 dark:bg-black">
+          <div className="flex min-h-0 flex-col rounded-xl border border-slate-200 bg-slate-100 p-3 dark:border-slate-300/20 dark:bg-slate-950/80 sm:p-4">
+            <div className="mb-3 w-fit max-w-full self-start rounded-xl border border-slate-300/85 bg-white/85 px-3 py-2 dark:border-slate-300/25 dark:bg-slate-900/75">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">Start Here</p>
+              <p className="mt-1 text-sm text-slate-700 dark:text-slate-100">
+                1) Upload an image. 2) Click Generate. 3) Review runs on the right.
+              </p>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-hidden rounded-xl border border-slate-300 bg-white dark:border-slate-300/25 dark:bg-slate-950">
               {imagePreviewUrl ? (
                 <div className="relative h-full w-full">
                   <NextImage src={imagePreviewUrl} alt="Uploaded preview" fill className="object-contain" unoptimized />
@@ -187,7 +222,7 @@ export default function GenerateCaptionsPanel({ isActive = true }: { isActive?: 
                   </div>
                 </div>
               ) : (
-                <div className="flex h-full flex-col items-center justify-center gap-2 p-4 text-center text-sm text-slate-600 dark:text-slate-400">
+                <div className="flex h-full flex-col items-center justify-center gap-2 p-4 text-center text-sm text-slate-600 dark:text-slate-300">
                   <p>Upload an image to preview it here.</p>
                   <p className="text-xs">Supported types: JPEG, JPG, PNG, WEBP, GIF, HEIC</p>
                 </div>
@@ -208,7 +243,7 @@ export default function GenerateCaptionsPanel({ isActive = true }: { isActive?: 
               type="button"
               onClick={handleChooseFile}
               disabled={isSubmitting}
-              className="mt-3 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/15 dark:bg-[#161616] dark:text-slate-100 dark:hover:bg-[#1f1f1f]"
+              className="mt-3 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-300/25 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
             >
               Upload Image
             </button>
@@ -217,41 +252,88 @@ export default function GenerateCaptionsPanel({ isActive = true }: { isActive?: 
               type="button"
               onClick={() => void handleGenerateCaptions()}
               disabled={!selectedFile || isSubmitting}
-              className="mt-2 rounded-xl border border-transparent bg-emerald-500/20 px-4 py-2.5 text-sm font-semibold text-emerald-800 transition-colors hover:bg-emerald-500/35 disabled:cursor-not-allowed disabled:opacity-40 dark:text-emerald-100"
+              className="mt-2 rounded-xl border border-transparent bg-emerald-500/20 px-4 py-2.5 text-sm font-semibold text-emerald-800 transition-colors hover:bg-emerald-500/35 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-emerald-500/25 dark:text-emerald-100"
             >
-              {isSubmitting ? 'Generating...' : 'Generate Captions'}
+              {generateButtonLabel}
             </button>
+
+            {selectedFile && !isSubmitting && (
+              <p className="mt-2 text-xs text-slate-600 dark:text-slate-300">
+                Next step: click the generate button. Uploading does not start generation automatically.
+              </p>
+            )}
           </div>
 
-          <div className="flex min-h-0 flex-col overflow-y-auto rounded-xl border border-slate-200 bg-slate-100 p-3 dark:border-white/10 dark:bg-[#050505] sm:p-4">
+          <div className="flex min-h-0 flex-col overflow-y-auto rounded-xl border border-slate-200 bg-slate-100 p-3 dark:border-slate-300/20 dark:bg-slate-950/70 sm:p-4">
             <div className="min-h-0 flex-1">
-              {captions.length === 0 ? (
-                <div className="flex h-full flex-col items-center justify-center gap-2 p-4 text-center text-sm text-slate-600 dark:text-slate-400">
+              {captionRuns.length === 0 ? (
+                <div className="flex h-full flex-col items-center justify-center gap-2 p-4 text-center text-sm text-slate-600 dark:text-slate-300">
                   <p>Generated captions will appear here after a successful run.</p>
+                  <p className="text-xs">Each new run is saved so you can compare results.</p>
                 </div>
               ) : (
-                <ol className="space-y-2">
-                  {captions.map((caption, index) => (
-                    <li
-                      key={getCaptionKey(caption, index)}
-                      className="rounded-xl border border-slate-300 bg-white px-3 py-2 dark:border-white/10 dark:bg-[#121212]"
-                    >
-                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                        Caption {index + 1}
-                      </p>
-                      <p className="mt-1 text-sm leading-relaxed text-slate-800 dark:text-slate-100">
-                        {extractCaptionText(caption)}
-                      </p>
-                    </li>
-                  ))}
-                </ol>
+                <>
+                  <div className="mb-3 rounded-xl border border-slate-300/85 bg-white/85 px-3 py-2 dark:border-slate-300/25 dark:bg-slate-900/75">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                      Generation History
+                    </p>
+                    <p className="mt-1 text-sm text-slate-700 dark:text-slate-100">
+                      {captionRuns.length} run{captionRuns.length === 1 ? '' : 's'} saved, {totalGeneratedCaptions}{' '}
+                      caption{totalGeneratedCaptions === 1 ? '' : 's'} total.
+                    </p>
+                    <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
+                      Next step: Generate More to append results, or switch to Caption Voting at the top.
+                    </p>
+                  </div>
+
+                  <ol className="space-y-3">
+                    {captionRuns.map((run, runIndex) => (
+                      <li
+                        key={run.id}
+                        className="rounded-xl border border-slate-300 bg-white px-3 py-3 dark:border-slate-300/25 dark:bg-slate-900/75"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-300">
+                            Run {captionRuns.length - runIndex}
+                          </p>
+                          <p className="text-xs text-slate-500 dark:text-slate-300">{formatRunTimestamp(run.createdAt)}</p>
+                        </div>
+                        <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
+                          {run.fileName ?? 'Uploaded image'} • {run.captions.length} caption
+                          {run.captions.length === 1 ? '' : 's'}
+                        </p>
+                        {run.captions.length === 0 ? (
+                          <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+                            No captions returned for this run.
+                          </p>
+                        ) : (
+                          <ol className="mt-2 space-y-2">
+                            {run.captions.map((caption, captionIndex) => (
+                              <li
+                                key={`${run.id}-${getCaptionKey(caption, captionIndex)}`}
+                                className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-300/20 dark:bg-slate-950/75"
+                              >
+                                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-300">
+                                  Caption {captionIndex + 1}
+                                </p>
+                                <p className="mt-1 text-sm leading-relaxed text-slate-800 dark:text-slate-100">
+                                  {extractCaptionText(caption)}
+                                </p>
+                              </li>
+                            ))}
+                          </ol>
+                        )}
+                      </li>
+                    ))}
+                  </ol>
+                </>
               )}
             </div>
           </div>
         </article>
 
         <div className="mt-3 shrink-0">
-          <p className="w-full rounded-xl border border-slate-300/80 bg-white px-3 py-2 text-center text-sm text-slate-700 dark:border-white/10 dark:bg-[#121212] dark:text-slate-200">
+          <p className="w-full rounded-xl border border-slate-300/80 bg-white px-3 py-2 text-center text-sm text-slate-700 dark:border-slate-300/25 dark:bg-slate-900/80 dark:text-slate-100">
             {statusMessage}
           </p>
           {errorMessage && (
@@ -263,6 +345,23 @@ export default function GenerateCaptionsPanel({ isActive = true }: { isActive?: 
       </div>
     </section>
   )
+}
+
+function createGenerationRunId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+
+  return `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+function formatRunTimestamp(createdAt: number): string {
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(createdAt)
 }
 
 async function getAccessToken(supabase: ReturnType<typeof createClient>): Promise<string> {

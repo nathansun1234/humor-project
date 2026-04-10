@@ -318,7 +318,8 @@ export default function SettingsMenu({
           <p className="text-xs font-medium text-slate-800 dark:text-neutral-100">Keyboard controls</p>
           <p className="mt-2 text-xs text-slate-600 dark:text-neutral-300">
             Press <span className="font-semibold">Up</span> to upvote, <span className="font-semibold">Down</span> to
-            downvote, and <span className="font-semibold">Left</span> to go back.
+            downvote, <span className="font-semibold">Left</span> to go back, and{' '}
+            <span className="font-semibold">Right</span> to skip.
           </p>
           <p className="mt-2 text-xs text-slate-600 dark:text-neutral-300">
             Turn this toggle off to disable all keyboard voting shortcuts.
