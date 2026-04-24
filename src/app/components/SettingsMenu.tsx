@@ -2,6 +2,7 @@
 
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { safeSignOut } from '@/lib/supabase/auth'
 import { createClient } from '@/lib/supabase/client'
 import {
   DYNAMIC_BACKGROUND_EVENT,
@@ -191,11 +192,7 @@ export default function SettingsMenu({
 
   const handleSignOut = async () => {
     const supabase = createClient()
-    try {
-      await supabase.auth.signOut()
-    } catch {
-      // Ignore sign-out failures caused by stale refresh tokens.
-    }
+    await safeSignOut(supabase)
     router.replace('/')
   }
 

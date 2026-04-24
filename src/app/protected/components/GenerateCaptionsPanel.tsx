@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import NextImage from 'next/image'
+import { safeSignOut } from '@/lib/supabase/auth'
 import { createClient } from '@/lib/supabase/client'
 
 const PIPELINE_BASE_URL = 'https://api.almostcrackd.ai'
@@ -383,14 +384,6 @@ async function getAccessToken(supabase: ReturnType<typeof createClient>): Promis
   } catch {
     await safeSignOut(supabase)
     throw new Error('Your session expired. Please sign in again.')
-  }
-}
-
-async function safeSignOut(supabase: ReturnType<typeof createClient>): Promise<void> {
-  try {
-    await supabase.auth.signOut()
-  } catch {
-    // Ignore sign-out failures caused by stale refresh tokens.
   }
 }
 

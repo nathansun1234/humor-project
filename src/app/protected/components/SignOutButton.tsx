@@ -1,5 +1,6 @@
 'use client'
 
+import { safeSignOut } from '@/lib/supabase/auth'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 
@@ -8,11 +9,7 @@ export default function SignOutButton({ className }: { className?: string }) {
   const supabase = createClient()
 
   const handleSignOut = async () => {
-    try {
-      await supabase.auth.signOut()
-    } catch {
-      // Ignore sign-out failures caused by stale refresh tokens.
-    }
+    await safeSignOut(supabase)
     router.push('/') // Redirect to home page after sign out
   }
 

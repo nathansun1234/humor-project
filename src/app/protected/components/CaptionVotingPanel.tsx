@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import NextImage from 'next/image'
+import { safeSignOut } from '@/lib/supabase/auth'
 import { createClient } from '@/lib/supabase/client'
 import {
   type BooleanSettingEventDetail,
@@ -84,7 +85,7 @@ export default function CaptionVotingPanel({
   const [seenCaptionIds, setSeenCaptionIds] = useState<Set<string>>(new Set())
   const [seenLookupReady, setSeenLookupReady] = useState(false)
   const [voteHistory, setVoteHistory] = useState<UndoSnapshot[]>([])
-  const [undoReminderVote, setUndoReminderVote] = useState<VoteValue | null>(null)
+  const [undoReminderVotesByCaptionId, setUndoReminderVotesByCaptionId] = useState<Record<string, VoteValue>>({})
   const [keyboardControlsEnabled, setKeyboardControlsEnabled] = useState(() =>
     readStoredBoolean(KEYBOARD_CONTROLS_STORAGE_KEY, true)
   )
@@ -95,15 +96,19 @@ export default function CaptionVotingPanel({
   const unseenIndex = findNextUnseenIndex(initialCaptions, seenCaptionIds, currentIndex)
   const computedDisplayIndex = unseenIndex
   const displayIndex = undoIndex ?? computedDisplayIndex
+  const isReviewingHistory = undoIndex !== null
   const currentCaption = initialCaptions[displayIndex] ?? null
   const previousCaption = displayIndex > 0 ? (initialCaptions[displayIndex - 1] ?? null) : null
   const nextCaptionIndex = currentCaption
-    ? findNextUnseenIndex(initialCaptions, seenCaptionIds, displayIndex + 1)
+    ? isReviewingHistory
+      ? displayIndex + 1
+      : findNextUnseenIndex(initialCaptions, seenCaptionIds, displayIndex + 1)
     : initialCaptions.length
   const nextCaption = initialCaptions[nextCaptionIndex] ?? null
   const currentCaptionImageUrl = currentCaption ? getCaptionImageUrl(currentCaption) : null
   const previousCaptionImageUrl = previousCaption ? getCaptionImageUrl(previousCaption) : null
   const nextCaptionImageUrl = nextCaption ? getCaptionImageUrl(nextCaption) : null
+  const undoReminderVote = currentCaption ? (undoReminderVotesByCaptionId[currentCaption.id] ?? null) : null
   const isTurning = turnState !== null
   const lastVoteAction = voteHistory[voteHistory.length - 1] ?? null
   const hasUndoHistory = Boolean(lastVoteAction)
@@ -210,12 +215,7 @@ export default function CaptionVotingPanel({
   )
 
   const handleExpiredSession = useCallback(async () => {
-    try {
-      await supabase.auth.signOut()
-    } catch {
-      // Ignore sign-out failures caused by stale refresh tokens.
-    }
-
+    await safeSignOut(supabase)
     setUserId(null)
     setMessage('Your session expired. Please sign in again.')
   }, [supabase])
@@ -260,7 +260,7 @@ export default function CaptionVotingPanel({
         setCurrentIndex(0)
         setUndoIndex(null)
         setVoteHistory([])
-        setUndoReminderVote(null)
+        setUndoReminderVotesByCaptionId({})
         setSeenLookupReady(true)
         return
       }
@@ -276,7 +276,7 @@ export default function CaptionVotingPanel({
       setCurrentIndex(findNextUnseenIndex(initialCaptions, seenIds, 0))
       setUndoIndex(null)
       setVoteHistory([])
-      setUndoReminderVote(null)
+      setUndoReminderVotesByCaptionId({})
       setSeenLookupReady(true)
     }
 
@@ -347,7 +347,6 @@ export default function CaptionVotingPanel({
       setActiveVote(vote)
       setActiveUndo(false)
       setActiveSkip(false)
-      setUndoReminderVote(null)
       setMessage(null)
       const feedbackPromise = runBackgroundFeedback(vote === 1 ? 'upvote' : 'downvote')
 
@@ -395,7 +394,9 @@ export default function CaptionVotingPanel({
 
       const updatedSeenIds = new Set(seenCaptionIds)
       updatedSeenIds.add(currentCaption.id)
-      const nextIndex = findNextUnseenIndex(initialCaptions, updatedSeenIds, displayIndex + 1)
+      const nextIndex = isReviewingHistory
+        ? displayIndex + 1
+        : findNextUnseenIndex(initialCaptions, updatedSeenIds, displayIndex + 1)
       const incomingCaption = initialCaptions[nextIndex] ?? null
       if (incomingCaption) {
         dispatchBackgroundImage(getCaptionImageUrl(incomingCaption))
@@ -404,7 +405,11 @@ export default function CaptionVotingPanel({
       await feedbackPromise
 
       setSeenCaptionIds(updatedSeenIds)
-      setUndoIndex(null)
+      setUndoReminderVotesByCaptionId((currentReminders) => ({
+        ...currentReminders,
+        [currentCaption.id]: vote,
+      }))
+      setUndoIndex(isReviewingHistory && incomingCaption ? nextIndex : null)
       if (incomingCaption) {
         await runTurnAnimation({
           direction: 'forward',
@@ -435,6 +440,7 @@ export default function CaptionVotingPanel({
       dispatchBackgroundImage,
       displayIndex,
       initialCaptions,
+      isReviewingHistory,
       runBackgroundFeedback,
       finishTurnAnimation,
       runTurnAnimation,
@@ -467,18 +473,14 @@ export default function CaptionVotingPanel({
       })
     }
 
-    setSeenCaptionIds((currentSeen) => {
-      if (previousAction.action !== 'vote') {
-        return currentSeen
-      }
-
-      const updatedSeen = new Set(currentSeen)
-      updatedSeen.delete(previousAction.captionId)
-      return updatedSeen
-    })
     setCurrentIndex(previousAction.index)
     setUndoIndex(previousAction.index)
-    setUndoReminderVote(previousAction.action === 'vote' ? previousAction.vote : null)
+    if (previousAction.action === 'vote') {
+      setUndoReminderVotesByCaptionId((currentReminders) => ({
+        ...currentReminders,
+        [previousAction.captionId]: previousAction.vote,
+      }))
+    }
     setVoteInFlight(false)
     setActiveUndo(false)
     finishTurnAnimation()
@@ -499,10 +501,27 @@ export default function CaptionVotingPanel({
     setActiveSkip(true)
     setActiveUndo(false)
     setActiveVote(null)
-    setUndoReminderVote(null)
     setMessage(null)
 
-    const nextIndex = findNextUnseenIndex(initialCaptions, seenCaptionIds, displayIndex + 1)
+    const shouldInvalidateVote = isReviewingHistory && userId && seenCaptionIds.has(currentCaption.id)
+    if (shouldInvalidateVote) {
+      const { error: deleteVoteError } = await supabase
+        .from('caption_votes')
+        .delete()
+        .eq('caption_id', currentCaption.id)
+        .eq('profile_id', userId)
+
+      if (deleteVoteError) {
+        setVoteInFlight(false)
+        setActiveSkip(false)
+        setMessage(`Could not clear prior vote: ${deleteVoteError.message}`)
+        return
+      }
+    }
+
+    const nextIndex = isReviewingHistory
+      ? displayIndex + 1
+      : findNextUnseenIndex(initialCaptions, seenCaptionIds, displayIndex + 1)
     const incomingCaption = initialCaptions[nextIndex] ?? null
     if (incomingCaption) {
       dispatchBackgroundImage(getCaptionImageUrl(incomingCaption))
@@ -522,7 +541,19 @@ export default function CaptionVotingPanel({
         index: displayIndex,
       },
     ])
-    setUndoIndex(null)
+    if (shouldInvalidateVote) {
+      setSeenCaptionIds((currentSeenIds) => {
+        const updatedSeenIds = new Set(currentSeenIds)
+        updatedSeenIds.delete(currentCaption.id)
+        return updatedSeenIds
+      })
+      setUndoReminderVotesByCaptionId((currentReminders) => {
+        const remainingReminders = { ...currentReminders }
+        delete remainingReminders[currentCaption.id]
+        return remainingReminders
+      })
+    }
+    setUndoIndex(isReviewingHistory && incomingCaption ? nextIndex : null)
     setCurrentIndex(nextIndex)
     setVoteInFlight(false)
     setActiveSkip(false)
@@ -535,8 +566,11 @@ export default function CaptionVotingPanel({
     displayIndex,
     finishTurnAnimation,
     initialCaptions,
+    isReviewingHistory,
     runTurnAnimation,
     seenCaptionIds,
+    supabase,
+    userId,
   ])
 
   useEffect(() => {
