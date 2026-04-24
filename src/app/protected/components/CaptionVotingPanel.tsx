@@ -100,9 +100,7 @@ export default function CaptionVotingPanel({
   const currentCaption = initialCaptions[displayIndex] ?? null
   const previousCaption = displayIndex > 0 ? (initialCaptions[displayIndex - 1] ?? null) : null
   const nextCaptionIndex = currentCaption
-    ? isReviewingHistory
-      ? displayIndex + 1
-      : findNextUnseenIndex(initialCaptions, seenCaptionIds, displayIndex + 1)
+    ? findNextUnseenIndex(initialCaptions, seenCaptionIds, displayIndex + 1)
     : initialCaptions.length
   const nextCaption = initialCaptions[nextCaptionIndex] ?? null
   const currentCaptionImageUrl = currentCaption ? getCaptionImageUrl(currentCaption) : null
@@ -394,9 +392,7 @@ export default function CaptionVotingPanel({
 
       const updatedSeenIds = new Set(seenCaptionIds)
       updatedSeenIds.add(currentCaption.id)
-      const nextIndex = isReviewingHistory
-        ? displayIndex + 1
-        : findNextUnseenIndex(initialCaptions, updatedSeenIds, displayIndex + 1)
+      const nextIndex = findNextUnseenIndex(initialCaptions, updatedSeenIds, displayIndex + 1)
       const incomingCaption = initialCaptions[nextIndex] ?? null
       if (incomingCaption) {
         dispatchBackgroundImage(getCaptionImageUrl(incomingCaption))
@@ -409,7 +405,7 @@ export default function CaptionVotingPanel({
         ...currentReminders,
         [currentCaption.id]: vote,
       }))
-      setUndoIndex(isReviewingHistory && incomingCaption ? nextIndex : null)
+      setUndoIndex(null)
       if (incomingCaption) {
         await runTurnAnimation({
           direction: 'forward',
@@ -440,7 +436,6 @@ export default function CaptionVotingPanel({
       dispatchBackgroundImage,
       displayIndex,
       initialCaptions,
-      isReviewingHistory,
       runBackgroundFeedback,
       finishTurnAnimation,
       runTurnAnimation,
@@ -519,9 +514,7 @@ export default function CaptionVotingPanel({
       }
     }
 
-    const nextIndex = isReviewingHistory
-      ? displayIndex + 1
-      : findNextUnseenIndex(initialCaptions, seenCaptionIds, displayIndex + 1)
+    const nextIndex = findNextUnseenIndex(initialCaptions, seenCaptionIds, displayIndex + 1)
     const incomingCaption = initialCaptions[nextIndex] ?? null
     if (incomingCaption) {
       dispatchBackgroundImage(getCaptionImageUrl(incomingCaption))
@@ -553,7 +546,7 @@ export default function CaptionVotingPanel({
         return remainingReminders
       })
     }
-    setUndoIndex(isReviewingHistory && incomingCaption ? nextIndex : null)
+    setUndoIndex(null)
     setCurrentIndex(nextIndex)
     setVoteInFlight(false)
     setActiveSkip(false)
